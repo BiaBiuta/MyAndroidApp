@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">MyAndroidApp</string>
+    <string name="posts">Posts</string>
+    <string name="login">Login</string>
+</resources>
