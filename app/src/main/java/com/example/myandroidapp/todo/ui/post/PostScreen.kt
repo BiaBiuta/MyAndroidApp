@@ -33,8 +33,12 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
+import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.Result
+import com.example.myandroidapp.core.data.UserPreferences
+import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.Location
+import com.example.myapplication.core.userPreferencesDataStore
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import androidx.compose.runtime.rememberCoroutineScope as rememberCoroutineScope1
@@ -65,7 +69,16 @@ fun PostAddScreen(onClose: () -> Unit) {
     var savingError by rememberSaveable { mutableStateOf<String?>(null) }
     val context = LocalContext.current
     val scope = rememberCoroutineScope1() // Gestionăm corutinele dintr-un context Compose
+    val userPreferencesRepository = UserPreferencesRepository(
+        dataStore = context.userPreferencesDataStore
+    )
+    var user by rememberSaveable { mutableStateOf<User>(User("","",0)) }
 
+    LaunchedEffect(Unit) {
+        scope.launch {
+            user = userPreferencesRepository.getUser()?:User("","",0)
+        }
+    }
     val selectImageLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
     ) { uri: Uri? ->
@@ -145,7 +158,7 @@ fun PostAddScreen(onClose: () -> Unit) {
                     scope.launch {
                         val base64Image = convertImageToBase64(context.contentResolver, uri)
                         if (base64Image != null) {
-                            postViewModel.saveOrUpdateItem(base64Image, description, "", "", "", "", locationToSave)
+                            postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)
                             Log.d("PostAdd", "Saving post with photo=$base64Image, description=$description, location=$selectedLocation")
                         } else {
                             savingError = "Eroare la conversia imaginii"

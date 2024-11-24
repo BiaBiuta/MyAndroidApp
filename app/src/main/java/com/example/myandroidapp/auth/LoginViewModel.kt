@@ -11,6 +11,7 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.AuthRepository
+import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import kotlinx.coroutines.launch
@@ -50,9 +51,11 @@ class LoginViewModel(
                 userPreferencesRepository.save(
                     UserPreferences(
                         email,
-                        result.getOrNull()?.token?:""
+                        result.getOrNull()?.token?:"",
+                        result.getOrNull()?.user?: User("","",0)
                     )
                 )
+                Log.d(TAG,result.getOrNull()?.user?.id.toString()?:"")
                 uiState=uiState.copy(isAuthenticatingProgress = false,isAuthenticate = true)
             }
             else{

@@ -51,6 +51,7 @@ class PostRepository(
     suspend fun refresh() {
 
         Log.d(TAG, "refresh started")
+        Log.d(TAG,getBearerToken())
         try {
             posts = postService.find(authorization = getBearerToken())
 

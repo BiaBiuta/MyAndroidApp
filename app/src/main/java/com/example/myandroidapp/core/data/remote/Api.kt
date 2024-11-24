@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 //e un singleton => exista o singura instanta a sa
 //in toata aplicatia
 object Api {
-    private val url="192.168.1.6:3000"
+    private val url="10.152.3.232:3000"
     private val httpUrl="http://$url/"
     val wsUrl="ws://$url/"
     private var gson=GsonBuilder()
@@ -27,6 +27,11 @@ object Api {
 
     val okHttpClient = OkHttpClient.Builder().apply {
         this.addInterceptor(tokenInterceptor)
-        this.callTimeout(60,TimeUnit.SECONDS)
+//        this.connectTimeout(30, TimeUnit.SECONDS)  // Timeout pentru conexiune
+//        this.readTimeout(60, TimeUnit.SECONDS)     // Mărește timeout-ul de citire
+//        this.writeTimeout(60, TimeUnit.SECONDS)    // Timeout pentru trimiterea cererii
+        this.callTimeout(90, TimeUnit.SECONDS)     // Timeout general pentru apel
     }.build()
+
+
 }

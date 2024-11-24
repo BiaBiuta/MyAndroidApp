@@ -19,7 +19,9 @@ class AuthDataSource (){
     // pentru a gestiona mai usor
     suspend fun login(user: User): Result<TokenHolder> {
         try {
-            return Result.success(authService.login(user))
+            val tokenHolder = authService.login(user)
+            Log.d(TAG,"tokenHolder ->user id =${tokenHolder.user.id}")
+            return Result.success(tokenHolder)
         } catch (e: Exception) {
             Log.w(TAG, "login failed", e)
             return Result.failure(e)

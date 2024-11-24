@@ -1,9 +1,11 @@
 package com.example.myapp
 
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.annotation.RequiresApi
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
@@ -15,6 +17,7 @@ import com.example.myandroidapp.ui.theme.MyAppTheme
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+    @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
@@ -50,6 +53,7 @@ fun MyApp(content: @Composable () -> Unit) {
     }
 }
 
+@RequiresApi(Build.VERSION_CODES.O)
 @Preview
 @Composable
 fun PreviewMyApp() {

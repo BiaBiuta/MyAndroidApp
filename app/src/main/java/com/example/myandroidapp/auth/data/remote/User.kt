@@ -1,4 +1,7 @@
 package com.example.myandroidapp.auth.data.remote
+import android.os.Parcelable
+import kotlinx.parcelize.Parcelize
+
 //equals()/hashCode() pair.- daca am date declarate ca parametrii secundari
 //si nu in constructor o sa vada obiectele la fel
 // exemplu cu oameni cu acelasi nume dar varsta diferita
@@ -9,5 +12,6 @@ package com.example.myandroidapp.auth.data.remote
 //componentN() functions corresponding to the properties in their order of declaration.
 //
 //copy() function (see below).
-data class User (val email: String, val password:String)
+@Parcelize
+data class User (val email: String, val password:String,val id:Int=0):Parcelable
 
