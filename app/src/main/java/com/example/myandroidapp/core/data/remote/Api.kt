@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit
 //e un singleton => exista o singura instanta a sa
 //in toata aplicatia
 object Api {
-    private val url="10.152.3.232:3000"
+    private val url="192.168.144.134:3000"
     private val httpUrl="http://$url/"
     val wsUrl="ws://$url/"
     private var gson=GsonBuilder()

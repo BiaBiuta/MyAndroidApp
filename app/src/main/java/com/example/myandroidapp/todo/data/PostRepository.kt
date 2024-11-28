@@ -4,9 +4,11 @@ import android.util.Log
 import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.remote.Api
+import com.example.myandroidapp.todo.data.remote.Payload
 import com.example.myandroidapp.todo.data.remote.PostEvent
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
+import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
@@ -51,15 +53,9 @@ class PostRepository(
     suspend fun refresh() {
 
         Log.d(TAG, "refresh started")
-        Log.d(TAG,getBearerToken())
+        //Log.d(TAG,getBearerToken())
         try {
             posts = postService.find(authorization = getBearerToken())
-
-//            posts.forEach { post ->
-//                Log.d(TAG, "Post: $post")
-//            }
-//            postDao.deleteAll()
-//            posts.forEach { postDao.insert(it) }
             Log.d(TAG, "refresh succeeded")
             postsFlow.emit(Result.Success(posts))
         } catch (e: Exception) {
@@ -72,12 +68,12 @@ class PostRepository(
         withContext(Dispatchers.IO) {
             getPostEvents().collect {
                 Log.d(TAG, "Item event collected $it")
-                if (it.isSuccess) {
-                    val postEvent = it.getOrNull();
-                    when (postEvent?.type) {
-                        "created" -> handleItemCreated(postEvent.payload)
-                        "updated" -> handleItemUpdated(postEvent.payload)
-                        "deleted" -> handleItemDeleted(postEvent.payload)
+                if (it is Result.Success) {
+                    val itemEvent = it.data;
+                    when (itemEvent.event) {
+                        "created" -> handleItemCreated(itemEvent.payload.item)
+                        "updated" -> handleItemUpdated(itemEvent.payload.item)
+                        "deleted" -> handleItemDeleted(itemEvent.payload.item)
                     }
                 }
             }
@@ -89,13 +85,14 @@ class PostRepository(
             postWsClient.closeSocket()
         }
     }
-    suspend fun getPostEvents(): Flow<kotlin.Result<PostEvent>> = callbackFlow {
+    suspend fun getPostEvents(): Flow<Result<PostEvent>> = callbackFlow {
         Log.d(TAG, "getItemEvents started")
         postWsClient.openSocket(
             onEvent = {
                 Log.d(TAG, "onEvent $it")
                 if (it != null) {
-                    trySend(kotlin.Result.success(it))
+                    Log.d(TAG, "onEvent trySend $it")
+                    trySend(Result.Success(it))
                 }
             },
             onClosed = { close() },
@@ -116,6 +113,24 @@ class PostRepository(
         val createdItem = postService.create(item = item, authorization = getBearerToken())
         Log.d(TAG, "save $item succeeded")
         handleItemCreated(createdItem)
+        val moshi = Moshi.Builder().build()
+        val jsonAdapter = moshi.adapter(PostEvent::class.java)
+        val postEvent = PostEvent(
+            event = "created",
+            payload = Payload(createdItem)
+        )
+        val eventJson = jsonAdapter.toJson(postEvent)
+
+        // Trimite mesajul JSON prin WebSocket
+        try {
+
+            postWsClient.webSocket.send(eventJson)
+            Log.d(TAG, "WebSocket event sent: $eventJson")
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to send WebSocket event", e)
+        }
+        // Trimite evenimentul către WebSocket
+        Log.d(TAG, "WebSocket event sent for $item")
         return createdItem
     }
 
@@ -133,6 +148,7 @@ class PostRepository(
 
     private suspend fun handleItemCreated(post: Post) {
         Log.d(TAG, "handleItemCreated...")
+        Log.d(TAG,post.toString())
         posts = listOf(post) + posts
         //Log.d(posts.toString(),"posts")
         postsFlow.emit(Result.Success(posts))

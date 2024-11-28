@@ -39,6 +39,8 @@ import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.Location
 import com.example.myapplication.core.userPreferencesDataStore
+import com.example.myapplication.notifications.createNotificationChannel
+import com.example.myapplication.notifications.showSimpleNotification
 import kotlinx.coroutines.launch
 import java.io.InputStream
 import androidx.compose.runtime.rememberCoroutineScope as rememberCoroutineScope1
@@ -93,6 +95,13 @@ fun PostAddScreen(onClose: () -> Unit) {
             Log.d("ItemScreen", "Closing screen");
             onClose();
         }
+    }
+    //val context = LocalContext.current
+    val channelId = "MyTestChannel"
+    var notificationId = 0
+
+    LaunchedEffect(Unit) {
+        createNotificationChannel(channelId, context)
     }
     Scaffold(
         topBar = {
@@ -160,12 +169,21 @@ fun PostAddScreen(onClose: () -> Unit) {
                         if (base64Image != null) {
                             postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)
                             Log.d("PostAdd", "Saving post with photo=$base64Image, description=$description, location=$selectedLocation")
+
                         } else {
                             savingError = "Eroare la conversia imaginii"
                         }
                         saving = false
                     }
                 }
+                showSimpleNotification(
+                    context,
+                    channelId,
+                    notificationId,
+                    "Post add",
+                    "${user.id} add a post"
+                )
+                notificationId += 1
             }) {
                 Text("Save Post")
             }

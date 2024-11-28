@@ -6,6 +6,7 @@ import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalContext
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.NavType
@@ -18,6 +19,8 @@ import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.core.ui.UserPreferencesViewModel
 import com.example.myandroidapp.todo.ui.post.PostAddScreen
+import com.example.myapplication.notifications.createNotificationChannel
+import com.example.myapplication.notifications.showSimpleNotification
 import com.example.myapplication.todo.ui.items.PostsScreen
 
 
@@ -53,6 +56,7 @@ fun MyAppNavHost() {
                 onAddItem = {
                     Log.d("MyAppNavHost", "navigate to new item")
                     navController.navigate("$postsRoute-new")
+
                 },
                 onLogout = {
                     Log.d("MyAppNavHost", "logout")
