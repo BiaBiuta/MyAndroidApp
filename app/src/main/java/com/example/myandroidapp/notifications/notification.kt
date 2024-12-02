@@ -3,6 +3,7 @@ package com.example.myapplication.notifications
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.media.RingtoneManager
 import android.os.Build
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
@@ -32,12 +33,13 @@ fun showSimpleNotification(
     priority: Int = NotificationCompat.PRIORITY_DEFAULT
 ) {
     val builder = NotificationCompat.Builder(context, channelId)
-        .setSmallIcon(R.drawable.ic_edit_location)
+        .setSmallIcon(R.drawable.ic_launcher_foreground) // Înlocuiește cu un icon valid
         .setContentTitle(textTitle)
         .setContentText(textContent)
-        .setPriority(priority)
+        .setPriority(NotificationCompat.PRIORITY_HIGH) // PRIORITATE MARE pentru sunet
+        .setAutoCancel(true) // Notificarea dispare la apăsare
+        .setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)) // Sunet explicit
 
-    with(NotificationManagerCompat.from(context)) {
-        notify(notificationId, builder.build())
-    }
+    val notificationManager = NotificationManagerCompat.from(context)
+    notificationManager.notify(notificationId, builder.build())
 }

@@ -95,6 +95,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
 
             Log.d(TAG,itemEvent.toString())
             onEvent(itemEvent)
+
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {

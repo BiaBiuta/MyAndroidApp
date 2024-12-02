@@ -1,6 +1,7 @@
 package com.example.myandroidapp.todo.ui.post
 
 import android.content.ContentResolver
+import android.media.RingtoneManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -31,10 +32,14 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.unit.dp
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil.compose.rememberAsyncImagePainter
+import com.example.myandroidapp.R
 import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.Result
+import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.Location
@@ -42,6 +47,7 @@ import com.example.myapplication.core.userPreferencesDataStore
 import com.example.myapplication.notifications.createNotificationChannel
 import com.example.myapplication.notifications.showSimpleNotification
 import kotlinx.coroutines.launch
+import kotlinx.serialization.json.JsonNull.content
 import java.io.InputStream
 import androidx.compose.runtime.rememberCoroutineScope as rememberCoroutineScope1
 
@@ -102,6 +108,8 @@ fun PostAddScreen(onClose: () -> Unit) {
 
     LaunchedEffect(Unit) {
         createNotificationChannel(channelId, context)
+        Log.d(TAG,"am creat notification channel")
+
     }
     Scaffold(
         topBar = {
