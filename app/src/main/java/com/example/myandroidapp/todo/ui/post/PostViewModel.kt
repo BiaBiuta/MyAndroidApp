@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.post
 
+import android.app.Application
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
@@ -12,12 +13,18 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import androidx.work.Constraints
+import androidx.work.Data
+import androidx.work.NetworkType
+import androidx.work.OneTimeWorkRequest
+import androidx.work.WorkManager
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
 import kotlinx.coroutines.launch
 import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
+import com.example.myandroidapp.jobs.ServerWorker
 import com.example.myandroidapp.todo.data.Location
 
 data class PostUiState(
@@ -26,9 +33,9 @@ data class PostUiState(
     var loadResult:Result<Post>?=null,
     var submitResult:Result<Post>?=null
 )
-class PostViewModel(private val postId: String?, private val itemRepository: PostRepository) :
+class PostViewModel(private val postId: String?, private val itemRepository: PostRepository,private val application: Application) :
     ViewModel() {
-
+    lateinit var workManager: WorkManager
     var uiState: PostUiState by mutableStateOf(PostUiState(loadResult = Result.Loading))
         private set
 
@@ -39,16 +46,16 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
         } else {
             uiState = uiState.copy(loadResult = Result.Success(Post()))
         }
+        workManager = WorkManager.getInstance(application)
     }
 
     fun loadItem() {
         viewModelScope.launch {
-            itemRepository.itemStream.collect { result ->
+            itemRepository.itemStream.collect { posts ->
                 if (!(uiState.loadResult is Result.Loading)) {
                     return@collect
                 }
-                if(result is Result.Success){
-                    val posts=result.data
+
                     val post =posts.find { it.id==postId }?:Post()
                     uiState = uiState.copy(post = post, loadResult = Result.Success(post))
 
@@ -56,7 +63,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                 //val item = items.find { it.id == itemId } ?: Post()
             }
         }
-    }
+
 
 
 
@@ -86,6 +93,10 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                  //isNotSaved: Boolean=false,
                  location=location 
                 )
+                val constraints = Constraints.Builder()
+                    .setRequiredNetworkType(NetworkType.CONNECTED)
+                    .build()
+
                 val editPost=item.copy(id=postId?:"",createdAt)
                 val savedItem: Post;
                 if (postId == null) {
@@ -93,6 +104,16 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                 } else {
                     savedItem = itemRepository.update(editPost)
                 }
+                val inputData= Data.Builder()
+                    .putString("id",savedItem.id)
+                    .putString("photo",savedItem.photo)
+                    .putString("user_id",savedItem.user_id)
+                    .putBoolean("isNotSaved",savedItem.isNotSaved)
+                    .putString("description",savedItem.description)
+                    .build()
+                val worker = OneTimeWorkRequest.Builder(ServerWorker::class.java)
+                    .setConstraints(constraints).setInputData(inputData).build()
+                workManager.enqueue(worker);
                 Log.d(TAG, "saveOrUpdateItem succeeeded");
                 uiState = uiState.copy(submitResult = Result.Success(savedItem))
             } catch (e: Exception) {
@@ -107,7 +128,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
             initializer {
                 val app =
                     (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
-                PostViewModel(itemId, app.container.postRepository)
+                PostViewModel(itemId, app.container.postRepository,app)
             }
         }
     }

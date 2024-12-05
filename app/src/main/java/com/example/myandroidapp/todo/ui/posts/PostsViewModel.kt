@@ -15,7 +15,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 
 class PostsViewModel(private val postRepository: PostRepository):ViewModel() {
-    val uiState: Flow<Result<List<Post>>> = postRepository.itemStream
+    val uiState: Flow<List<Post>> = postRepository.itemStream
     init {
         Log.d(TAG, "init")
         loadItems()

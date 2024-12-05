@@ -8,6 +8,7 @@ import com.example.myandroidapp.todo.data.remote.Payload
 import com.example.myandroidapp.todo.data.remote.PostEvent
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
+import com.example.myapp.todo.data.local.ItemDao
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.BufferOverflow
@@ -23,6 +24,7 @@ import kotlin.collections.List
 class PostRepository(
     private val postService: PostService,
     private val postWsClient: PostWsClient,
+    private val itemDao: ItemDao
     ) {
     private var posts: kotlin.collections.List<Post> = kotlin.collections.listOf()
 
@@ -33,7 +35,7 @@ class PostRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    val itemStream: Flow<Result<List<Post>>> = postsFlow
+    val itemStream by lazy { itemDao.getAll() }
 
     init {
         Log.d(TAG, "init")
@@ -56,13 +58,17 @@ class PostRepository(
         //Log.d(TAG,getBearerToken())
         try {
             posts = postService.find(authorization = getBearerToken())
+            itemDao.deleteAll()
             Log.d(TAG, "refresh succeeded")
-            postsFlow.emit(Result.Success(posts))
+            posts.forEach{itemDao.insert(it)}
+//            postsFlow.emit(Result.Success(posts))
         } catch (e: Exception) {
             Log.w(TAG, "refresh failed", e)
             postsFlow.emit(Result.Error(e))
         }
     }
+
+
     suspend fun openWsClient() {
         Log.d(TAG, "openWsClient")
         withContext(Dispatchers.IO) {
@@ -149,20 +155,20 @@ class PostRepository(
     private suspend fun handleItemCreated(post: Post) {
         Log.d(TAG, "handleItemCreated...")
         Log.d(TAG,post.toString())
-        posts = listOf(post) + posts
-        //Log.d(posts.toString(),"posts")
-        postsFlow.emit(Result.Success(posts))
-        //postDao.insert(item)
+//        posts = listOf(post) + posts
+//        //Log.d(posts.toString(),"posts")
+//        postsFlow.emit(Result.Success(posts))
+        itemDao.insert(post)
     }
 
     suspend fun deleteAll() {
-        //postDao.deleteAll()
+        itemDao.deleteAll()
     }
 
     fun setToken(token: String) {
         postWsClient.authorize(token)
     }
 //    suspend fun deleteItem(item: Post) {
-//        postDao.(item.lat, item.lon);
+//        itemDao.de(item.lat, item.lon);
 //    }
 }

@@ -11,6 +11,7 @@ import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.PostRepository
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
+import com.example.myapp.MyAppDatabase
 
 //import com.example.myapplication.MyAppDatabase
 //import com.example.myapplication.auth.data.AuthRepository
@@ -33,7 +34,7 @@ class AppContainer(val context: Context) {
     private val postService: PostService = Api.retrofit.create(PostService::class.java)
     private val postWsClient: PostWsClient = PostWsClient(Api.okHttpClient)
     private val authDataSource: AuthDataSource = AuthDataSource()
-
+    private val database: MyAppDatabase by lazy { MyAppDatabase.getDatabase(context) }
     //private val database: MyAppDatabase by lazy { MyAppDatabase.getDatabase(context) }
     //*
     // we want to access from all models this repository
@@ -41,7 +42,7 @@ class AppContainer(val context: Context) {
     //initialization
     //*
     val postRepository: PostRepository by lazy {
-        PostRepository(postService, postWsClient)
+        PostRepository(postService, postWsClient,database.itemDao())
     }
 
     val authRepository: AuthRepository by lazy {

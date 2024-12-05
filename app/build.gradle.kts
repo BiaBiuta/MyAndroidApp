@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.google.ksp)
 
     id("org.jetbrains.kotlin.plugin.parcelize")
-
+    id("kotlin-kapt")
 
 }
 
@@ -70,9 +70,13 @@ dependencies {
     implementation(libs.converter.moshi)
     implementation(libs.okhttp.logging.interceptor)
     // Room
-    implementation(libs.androidx.room.runtime)
-    ksp(libs.androidx.room.compiler)
-    implementation(libs.androidx.room.ktx)
+    implementation("androidx.work:work-runtime-ktx:2.7.1")
+    implementation("androidx.room:room-runtime:2.6.0")
+    kapt("androidx.room:room-compiler:2.6.0")
+//    implementation(libs.androidx.room.runtime)
+//    implementation(libs.androidx.adapters)
+//    ksp(libs.androidx.room.compiler)
+implementation(libs.androidx.room.ktx)
     // Data store
     implementation(libs.androidx.datastore.preferences)
     testImplementation(libs.junit)
@@ -88,4 +92,9 @@ dependencies {
     androidTestImplementation(libs.androidx.ui.test.junit4)
     debugImplementation(libs.androidx.ui.tooling)
     debugImplementation(libs.androidx.ui.test.manifest)
+    implementation ("androidx.compose.ui:ui:1.4.0")
+    implementation ("androidx.compose.material:material:1.4.0")
+    implementation ("androidx.compose.material3:material3:1.0.0")
+
+
 }
