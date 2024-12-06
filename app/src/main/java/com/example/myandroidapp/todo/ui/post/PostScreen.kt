@@ -46,6 +46,13 @@ import com.example.myandroidapp.todo.data.Location
 import com.example.myapplication.core.userPreferencesDataStore
 import com.example.myapplication.notifications.createNotificationChannel
 import com.example.myapplication.notifications.showSimpleNotification
+import com.google.android.gms.maps.model.CameraPosition
+import com.google.android.gms.maps.model.LatLng
+import com.google.maps.android.compose.GoogleMap
+import com.google.maps.android.compose.Marker
+import com.google.maps.android.compose.MarkerState
+import com.google.maps.android.compose.rememberCameraPositionState
+import com.google.maps.android.compose.rememberMarkerState
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull.content
 import java.io.InputStream
@@ -81,7 +88,12 @@ fun PostAddScreen(onClose: () -> Unit) {
         dataStore = context.userPreferencesDataStore
     )
     var user by rememberSaveable { mutableStateOf<User>(User("","",0)) }
-
+    val markerState = rememberMarkerState(
+        position = LatLng(selectedLocation?.first ?: 0.0, selectedLocation?.second ?: 0.0)
+    )
+    val cameraPositionState = rememberCameraPositionState {
+        position = CameraPosition.fromLatLngZoom(markerState.position, 10f)
+    }
     LaunchedEffect(Unit) {
         scope.launch {
             user = userPreferencesRepository.getUser()?:User("","",0)
@@ -155,7 +167,21 @@ fun PostAddScreen(onClose: () -> Unit) {
 
             // Location Selector
             Button(onClick = {
-                selectedLocation = Pair(47.0, 27.0) // Simulăm selecția locației
+//                GoogleMap(
+//                    cameraPositionState = cameraPositionState,
+//                    onMapLongClick = {
+//                        markerState.position = it
+//                        lat = it.latitude
+//                        lon = it.longitude
+//                    },
+//                ) {
+//                    Marker(
+//                        state = MarkerState(position = markerState.position),
+//                        title = "User location title",
+//                        snippet = "User location",
+//                    )
+//                }
+             selectedLocation = Pair(47.0, 27.0) //Simulăm selecția locației
             }) {
                 Text("Select Location")
             }

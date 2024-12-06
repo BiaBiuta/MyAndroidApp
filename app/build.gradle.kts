@@ -9,6 +9,9 @@ plugins {
     id("kotlin-kapt")
 
 }
+ksp {
+    arg("room.schemaLocation", "$projectDir/schemas")
+}
 
 android {
     namespace = "com.example.myandroidapp"
@@ -73,6 +76,11 @@ dependencies {
     implementation("androidx.work:work-runtime-ktx:2.7.1")
     implementation("androidx.room:room-runtime:2.6.0")
     kapt("androidx.room:room-compiler:2.6.0")
+    implementation("com.google.accompanist:accompanist-permissions:0.23.1")
+
+    implementation("com.google.android.gms:play-services-location:21.0.1")
+
+    implementation("com.google.maps.android:maps-compose:2.7.2")
 //    implementation(libs.androidx.room.runtime)
 //    implementation(libs.androidx.adapters)
 //    ksp(libs.androidx.room.compiler)

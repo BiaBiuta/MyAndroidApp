@@ -56,6 +56,11 @@ fun PostsScreen(onItemClick: (id: String?) -> Unit, onAddItem: () -> Unit, onLog
             TopAppBar(
                 title = { Text(text = stringResource(id = R.string.posts)) },
                 actions = {
+                    Text(
+                        text = if (myNetworkStatusViewModel.uiState) "Online" else "Offline",
+                        style = MaterialTheme.typography.body1,
+                        color = if (myNetworkStatusViewModel.uiState) Purple80 else MaterialTheme.colors.error
+                    )
                     Button(onClick = onLogout) { Text("Logout") }
                 }
             )
@@ -69,20 +74,13 @@ fun PostsScreen(onItemClick: (id: String?) -> Unit, onAddItem: () -> Unit, onLog
             ) { Icon(Icons.Rounded.Add, "Add") }
         }
     ) {
+
         Column(
             modifier = Modifier.fillMaxSize()
         ) {
-            Row(
-                modifier = Modifier.padding(10.dp)
 
-            ) {
-                androidx.compose.material.Text(
-                    "Is online: ${myNetworkStatusViewModel.uiState}",
-                    style = MaterialTheme.typography.h5,
-                )
-            }
-            Divider(color = Purple80, thickness = 2.dp)
             Row() {
+
 
                         PostList(
                             posts = itemsUiState ,

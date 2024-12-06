@@ -15,6 +15,7 @@
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
 
 
+
     <application
         android:name=".MyApplication"
         android:usesCleartextTraffic="true"
@@ -47,6 +48,12 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths" />
         </provider>
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="AIzaSyD6myuzxKnmcqMbuJkgkd-rUYr8e8GLtAM" />
+        <meta-data
+            android:name="com.google.android.gms.version"
+            android:value="@integer/google_play_services_version" />
 
     </application>
 
