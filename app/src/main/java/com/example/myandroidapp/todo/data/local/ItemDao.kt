@@ -11,7 +11,7 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ItemDao {
-    @Query("SELECT * FROM Posts")
+    @Query("SELECT * FROM Posts ORDER BY created_at DESC")
     fun getAll(): Flow<List<Post>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)

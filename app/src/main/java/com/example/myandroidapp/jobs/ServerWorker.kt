@@ -6,6 +6,7 @@ import androidx.work.WorkerParameters
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.todo.data.Location
 import com.example.myandroidapp.todo.data.Post
+import java.io.File
 
 
 class ServerWorker(
@@ -17,7 +18,9 @@ class ServerWorker(
 
         val isSaving = workerParams.inputData.getBoolean("isSaving", true);
         val id = workerParams.inputData.getString("id")!!
-        val photo = workerParams.inputData.getString("photo")!!
+        val photoPath = workerParams.inputData.getString("photoPath")!!
+        val photoData = File(photoPath).readText()
+
         var user_id=workerParams.inputData.getString("user_id")!!
 
 
@@ -31,7 +34,7 @@ class ServerWorker(
 
         val item = Post(
             id = id,
-            photo = photo,
+            photo = photoData,
             user_id = user_id,
             user_profile_photo = "",
             user_last_name = "",

@@ -1,6 +1,7 @@
 package com.example.myandroidapp.todo.ui.post
 
 import android.app.Application
+import android.content.Context
 import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
@@ -26,6 +27,9 @@ import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.jobs.ServerWorker
 import com.example.myandroidapp.todo.data.Location
+
+import java.io.File
+
 
 data class PostUiState(
     val postId:String?=null,
@@ -64,6 +68,11 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
             }
         }
 
+    private fun savePhotoToFile(context: Application, photoData: String): String {
+        val file = File(context.filesDir, "photo_${System.currentTimeMillis()}.txt")
+        file.writeText(photoData)
+        return file.absolutePath
+    }
 
 
 
@@ -99,23 +108,28 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
 
                 val editPost=item.copy(id=postId?:"",createdAt)
                 val savedItem: Post;
-                if (postId == null) {
-                    savedItem = itemRepository.save(item)
-                } else {
-                    savedItem = itemRepository.update(editPost)
-                }
+//                if (postId == null) {
+//                    savedItem = itemRepository.save(item)
+//                } else {
+//                    savedItem = itemRepository.update(editPost)
+//                }
+                val photoPath = savePhotoToFile(application, item.photo)
+
+
+
+
                 val inputData= Data.Builder()
-                    .putString("id",savedItem.id)
-                    .putString("photo",savedItem.photo)
-                    .putString("user_id",savedItem.user_id)
-                    .putBoolean("isNotSaved",savedItem.isNotSaved)
-                    .putString("description",savedItem.description)
+                    .putString("id",item.id)
+                    .putString("photoPath", photoPath)
+                    .putString("user_id",item.user_id)
+                    .putBoolean("isNotSaved",item.isNotSaved)
+                    .putString("description",item.description)
                     .build()
                 val worker = OneTimeWorkRequest.Builder(ServerWorker::class.java)
                     .setConstraints(constraints).setInputData(inputData).build()
                 workManager.enqueue(worker);
                 Log.d(TAG, "saveOrUpdateItem succeeeded");
-                uiState = uiState.copy(submitResult = Result.Success(savedItem))
+                uiState = uiState.copy(submitResult = Result.Success(item))
             } catch (e: Exception) {
                 Log.d(TAG, "saveOrUpdateItem failed");
                 uiState = uiState.copy(submitResult = Result.Error(e))
