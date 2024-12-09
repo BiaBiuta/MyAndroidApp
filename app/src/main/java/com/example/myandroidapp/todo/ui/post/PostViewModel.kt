@@ -103,7 +103,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                  location=location 
                 )
                 val constraints = Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
+
                     .build()
 
                 val editPost=item.copy(id=postId?:"",createdAt)

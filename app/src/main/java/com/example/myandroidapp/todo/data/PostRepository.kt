@@ -160,6 +160,10 @@ class PostRepository(
 //        postsFlow.emit(Result.Success(posts))
         itemDao.insert(post)
     }
+    suspend fun saveToLocal(post: Post) {
+        itemDao.insert(post) // `postDao` reprezintă DAO-ul pentru entitatea `Post`
+    }
+
 
     suspend fun deleteAll() {
         itemDao.deleteAll()
