@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.post
 
+import MyLocationViewModel
 import android.app.Application
 import android.content.ContentResolver
 import android.media.RingtoneManager
@@ -44,7 +45,7 @@ import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.maps.MyLocation
-import com.example.myandroidapp.maps.MyLocationViewModel
+
 import com.example.myandroidapp.maps.MyMap
 import com.example.myandroidapp.todo.data.Location
 import com.example.myapplication.core.userPreferencesDataStore
@@ -176,16 +177,20 @@ fun PostAddScreen(onClose: () -> Unit) {
             MyLocation(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp)
+                    .height(300.dp) ,
+                onLocationSelected = { lat, lon ->
+                    Log.d("PostAdd", "Actualizez Location: $lat, $lon")
+                    selectedLocation = Pair(lat, lon) // Actualizează coordonatele selectate
+                }
             )
-            Button(onClick = {
-                selectedLocation = Pair(
-                    myLocationViewModel.uiState?.latitude ?: 0.0,
-                    myLocationViewModel.uiState?.longitude ?: 0.0
-                )
-            }) {
-                //Text("Save Current Location")
-            }
+//            Button(onClick = {
+//                selectedLocation = Pair(
+//                    myLocationViewModel.uiState?.latitude ?: 0.0,
+//                    myLocationViewModel.uiState?.longitude ?: 0.0
+//                )
+//            }) {
+//                //Text("Save Current Location")
+//            }
 
             selectedLocation?.let {
                 Log.d("PostAdd", "Selected Location: ${it.first}, ${it.second}")

@@ -1,5 +1,6 @@
 package com.example.myandroidapp.maps
 
+import MyLocationViewModel
 import android.Manifest
 import android.app.Application
 import androidx.compose.material3.LinearProgressIndicator
@@ -13,7 +14,7 @@ import com.ilazar.myapp3.util.RequirePermissions
 
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
-fun MyLocation(modifier: Modifier = Modifier) {
+fun MyLocation(modifier: Modifier = Modifier,onLocationSelected: (Double, Double) -> Unit) {
     RequirePermissions(
         permissions = listOf(
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -22,13 +23,14 @@ fun MyLocation(modifier: Modifier = Modifier) {
         modifier = modifier
     ) {
         ShowMyLocation(
-            modifier = modifier
+            modifier = modifier,
+            onLocationSelected = onLocationSelected
         )
     }
 }
 
 @Composable
-fun ShowMyLocation(modifier: Modifier) {
+fun ShowMyLocation(modifier: Modifier,onLocationSelected: (Double, Double) -> Unit) {
     val myLocationViewModel = viewModel<MyLocationViewModel>(
         factory = MyLocationViewModel.Factory(
             LocalContext.current.applicationContext as Application
@@ -36,8 +38,18 @@ fun ShowMyLocation(modifier: Modifier) {
     )
 
     val location = myLocationViewModel.uiState
+    val selectedLocation = myLocationViewModel.selectedLocation
+
     if (location != null) {
-        MyMap(location.latitude, location.longitude, modifier)
+        val latitude = selectedLocation?.first ?: location.latitude
+        val longitude = selectedLocation?.second ?: location.longitude
+
+        MyMap(
+            lat = latitude,
+            long = longitude,
+            modifier = modifier,
+            onMarkerMoved = onLocationSelected
+        )
     } else {
         LinearProgressIndicator()
     }
