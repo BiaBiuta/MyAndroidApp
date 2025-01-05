@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.post
 
+import android.app.Application
 import android.content.ContentResolver
 import android.media.RingtoneManager
 import android.net.Uri
@@ -42,6 +43,9 @@ import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
+import com.example.myandroidapp.maps.MyLocation
+import com.example.myandroidapp.maps.MyLocationViewModel
+import com.example.myandroidapp.maps.MyMap
 import com.example.myandroidapp.todo.data.Location
 import com.example.myapplication.core.userPreferencesDataStore
 import com.example.myapplication.notifications.createNotificationChannel
@@ -86,6 +90,11 @@ fun PostAddScreen(onClose: () -> Unit) {
     val scope = rememberCoroutineScope1() // Gestionăm corutinele dintr-un context Compose
     val userPreferencesRepository = UserPreferencesRepository(
         dataStore = context.userPreferencesDataStore
+    )
+    val myLocationViewModel = viewModel<MyLocationViewModel>(
+        factory = MyLocationViewModel.Factory(
+            LocalContext.current.applicationContext as Application
+        )
     )
     var user by rememberSaveable { mutableStateOf<User>(User("","",0)) }
     val markerState = rememberMarkerState(
@@ -150,7 +159,7 @@ fun PostAddScreen(onClose: () -> Unit) {
                         .size(150.dp)
                         .border(1.dp, Color.Gray)
                 )
-                Text("Photo Path: $photoPath") // Afișează calea imaginii
+                //Text("Photo Path: $photoPath") // Afișează calea imaginii
             }
 
             // Description Input
@@ -164,33 +173,30 @@ fun PostAddScreen(onClose: () -> Unit) {
                     .border(1.dp, Color.Gray)
                     .padding(8.dp)
             )
-
-            // Location Selector
+            MyLocation(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(300.dp)
+            )
             Button(onClick = {
-//                GoogleMap(
-//                    cameraPositionState = cameraPositionState,
-//                    onMapLongClick = {
-//                        markerState.position = it
-//                        lat = it.latitude
-//                        lon = it.longitude
-//                    },
-//                ) {
-//                    Marker(
-//                        state = MarkerState(position = markerState.position),
-//                        title = "User location title",
-//                        snippet = "User location",
-//                    )
-//                }
-             selectedLocation = Pair(47.0, 27.0) //Simulăm selecția locației
+                selectedLocation = Pair(
+                    myLocationViewModel.uiState?.latitude ?: 0.0,
+                    myLocationViewModel.uiState?.longitude ?: 0.0
+                )
             }) {
-                Text("Select Location")
+                //Text("Save Current Location")
             }
+
             selectedLocation?.let {
-                Text("Selected Location: ${it.first}, ${it.second}")
+                Log.d("PostAdd", "Selected Location: ${it.first}, ${it.second}")
+                //Text("Selected Location: ${it.first}, ${it.second}")
             }
+
+
 
             val locationToSave = selectedLocation?.let {
                 Location(it.first, it.second)
+
             } ?: Location()
 
             // Save Button
@@ -199,6 +205,7 @@ fun PostAddScreen(onClose: () -> Unit) {
                 savingError = null
                 photoUri?.let { uri ->
                     scope.launch {
+                        Log.d("PostAdd", "Location to save: $locationToSave")
                         val base64Image = convertImageToBase64(context.contentResolver, uri)
                         if (base64Image != null) {
                             postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)

@@ -15,8 +15,9 @@ import com.example.myandroidapp.MyAppNavHost
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.ui.theme.MyAppTheme
-import com.example.myapplication.maps.Permissions
+
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
+import com.ilazar.myapp3.util.RequirePermissions
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -50,14 +51,12 @@ class MainActivity : ComponentActivity() {
 fun MyApp(content: @Composable () -> Unit) {
     Log.d("MyApp", "recompose")
     MyAppTheme {
-        Permissions(
-            permissions = listOf(
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-                Manifest.permission.ACCESS_FINE_LOCATION
-            ),
-            rationaleText = "Please allow app to use location (coarse or fine)",
-            dismissedText = "O noes! No location provider allowed!"
-        )
+//        RequirePermissions(
+//            permissions = listOf(
+//                Manifest.permission.ACCESS_COARSE_LOCATION,
+//                Manifest.permission.ACCESS_FINE_LOCATION
+//            )
+//        )
         Surface {
             content()
         }

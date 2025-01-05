@@ -88,6 +88,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
 
                 val location = Location(selectedLocation.latitude,selectedLocation.longitude)
                    ?: Location( 47.0,  48.0)
+                Log.d(TAG, "saveOrUpdateItem...location=${location.latitude},${location.longitude}");
                 val postId=uiState.postId
                 val item = uiState.post.copy(
                      photo=photo?:"",
@@ -124,6 +125,8 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                     .putString("user_id",item.user_id)
                     .putBoolean("isNotSaved",item.isNotSaved)
                     .putString("description",item.description)
+                    .putDouble("latitudine",item.location.latitude)
+                    .putDouble("longitudine",item.location.longitude)
                     .build()
                 val worker = OneTimeWorkRequest.Builder(ServerWorker::class.java)
                     .setConstraints(constraints).setInputData(inputData).build()

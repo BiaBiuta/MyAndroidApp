@@ -162,7 +162,7 @@ class PostRepository(
 
     private suspend fun handleItemCreated(post: Post) {
         Log.d(TAG, "handleItemCreated...")
-        Log.d(TAG,post.toString())
+        //Log.d(TAG,post.toString())
 //        posts = listOf(post) + posts
 //        //Log.d(posts.toString(),"posts")
 //        postsFlow.emit(Result.Success(posts))

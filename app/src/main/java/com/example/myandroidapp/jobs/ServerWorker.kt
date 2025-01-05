@@ -21,6 +21,8 @@ class ServerWorker(
         val isSaving = workerParams.inputData.getBoolean("isSaving", true);
         val id = workerParams.inputData.getString("id")!!
         val photoPath = workerParams.inputData.getString("photoPath")!!
+        val latitudine = workerParams.inputData.getDouble("latitudine",0.0)!!
+        val longitudine = workerParams.inputData.getDouble("longitudine",0.0)!!
         val photoData = File(photoPath).readText()
 
         var user_id = workerParams.inputData.getString("user_id")!!
@@ -46,7 +48,7 @@ class ServerWorker(
             created_at = "",
             updated_at = "",
             isNotSaved = true,
-            location = Location(0.0, 0.0),
+            location = Location(latitudine, longitudine),
             description = description
         )
 
