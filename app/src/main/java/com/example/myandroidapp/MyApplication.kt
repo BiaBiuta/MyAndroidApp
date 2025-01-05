@@ -15,16 +15,23 @@ package com.example.myandroidapp/*
  */
 
 import android.app.Application
+import android.content.IntentFilter
+import android.net.ConnectivityManager
 import android.util.Log
 import com.example.myandroidapp.core.TAG
+import com.example.myandroidapp.network.NetworkChangeReceiver
 import com.example.myapplication.core.AppContainer
 
 class MyApplication : Application() {
     lateinit var container: AppContainer
+    private lateinit var networkChangeReceiver: NetworkChangeReceiver
 
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "init")
+         networkChangeReceiver = NetworkChangeReceiver()
+        val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
+        registerReceiver(networkChangeReceiver, intentFilter)
         container = AppContainer(this)
     }
 }

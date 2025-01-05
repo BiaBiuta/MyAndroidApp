@@ -35,7 +35,7 @@ class ServerWorker(
         val description = workerParams.inputData.getString("description")!!
 
 
-        val item = Post(
+        var item = Post(
             id = id,
             photo = photoData,
             user_id = user_id,
@@ -53,6 +53,7 @@ class ServerWorker(
         return if (isOnline(applicationContext)) {
             // Trimite datele către server
             try {
+                item = item.copy(isNotSaved = false)
                 if (isSaving) {
                     itemRepository.save(item) // Salvare pe server
                 } else {
@@ -65,6 +66,7 @@ class ServerWorker(
             }
         } else {
             // Salvează datele local
+                item = item.copy(isNotSaved = true)
             try {
                 itemRepository.saveToLocal(item) // Asigură-te că `saveToLocal` este implementat în DAO
                 Result.success()

@@ -25,5 +25,9 @@ interface ItemDao {
 
     @Query("DELETE FROM Posts")
     suspend fun deleteAll(): Unit
+    @Query("SELECT * FROM Posts WHERE isNotSaved = 1")
+    suspend fun getUnsyncedItems(): List<Post>
 
+    @Query("UPDATE Posts SET isNotSaved = 0 WHERE id = :id")
+    suspend fun markAsSynced(id: String)
 }

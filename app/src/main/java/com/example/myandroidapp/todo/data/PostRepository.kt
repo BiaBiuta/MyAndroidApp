@@ -57,6 +57,7 @@ class PostRepository(
         Log.d(TAG, "refresh started")
         //Log.d(TAG,getBearerToken())
         try {
+
             posts = postService.find(authorization = getBearerToken())
             itemDao.deleteAll()
             Log.d(TAG, "refresh succeeded")
@@ -150,6 +151,13 @@ class PostRepository(
         posts = posts.map { if (it.id == post.id) post else it }
 
 
+    }
+    suspend fun getUnsyncedItems(): List<Post> {
+        return itemDao.getUnsyncedItems()
+    }
+
+    suspend fun markAsSynced(id: String) {
+        itemDao.markAsSynced(id)
     }
 
     private suspend fun handleItemCreated(post: Post) {
