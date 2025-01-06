@@ -100,6 +100,9 @@ fun PostsScreen(
                 posts = itemsUiState,
                 onPostClick = { postId ->
                     val post = itemsUiState.find { it.id == postId }
+                    if (post != null) {
+                        Log.d("PostsScreen", "Post clicked: ${post.location?.latitude}, ${post.location?.longitude}")
+                    }
                     post?.location?.let { location ->
                         handlePostClick(location) { location ->
                             selectedLocation = location

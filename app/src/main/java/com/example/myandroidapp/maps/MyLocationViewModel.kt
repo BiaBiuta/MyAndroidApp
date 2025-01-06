@@ -24,7 +24,8 @@ class MyLocationViewModel(application: Application) : AndroidViewModel(applicati
         collectLocation()
     }
 
-    private fun collectLocation() {
+    public fun collectLocation() {
+        Log.d("MyLocationViewModel", "collectLocation")
         viewModelScope.launch {
             LocationMonitor(getApplication()).currentLocation.collect {
                 Log.d("MyLocationViewModel", "collect $it")
