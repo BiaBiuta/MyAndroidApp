@@ -1,33 +1,27 @@
 package com.example.myapplication.todo.ui.items
 
-
 import MyLocationViewModel
 import android.app.Application
 import android.util.Log
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.padding
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.FastOutLinearInEasing
+import androidx.compose.animation.core.LinearOutSlowInEasing
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material3.Button
-import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
+import androidx.compose.material.Surface
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myandroidapp.R
@@ -37,24 +31,37 @@ import com.example.myandroidapp.todo.ui.posts.PostList
 import com.example.myandroidapp.todo.ui.posts.PostsViewModel
 import com.example.myandroidapp.ui.theme.Purple80
 import com.example.myapplication.network.MyNetworkStatusViewModel
+import com.ilazar.myanimationsapp.MyFloatingActionButton
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PostsScreen(onItemClick: (id: String?) -> Unit, onAddItem: () -> Unit, onLogout: () -> Unit) {
-    Log.d("ItemsScreen", "recompose")
+fun PostsScreen(
+    onItemClick: (id: String?) -> Unit,
+    onAddItem: () -> Unit,
+    onLogout: () -> Unit
+) {
+    Log.d("PostsScreen", "recompose")
+
     val itemsViewModel = viewModel<PostsViewModel>(factory = PostsViewModel.Factory)
-
-    val itemsUiState by itemsViewModel.uiState.collectAsStateWithLifecycle(
-        initialValue = listOf()
-    )
-
     val myNetworkStatusViewModel = viewModel<MyNetworkStatusViewModel>(
-        factory = MyNetworkStatusViewModel.Factory(
-            LocalContext.current.applicationContext as Application
-        )
+        factory = MyNetworkStatusViewModel.Factory(LocalContext.current.applicationContext as Application)
     )
+
+    var isEditing by remember { mutableStateOf(false) }
     var showMapDialog by rememberSaveable { mutableStateOf(false) }
     var selectedLocation by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
+    val coroutineScope = rememberCoroutineScope()
+    val itemsUiState by itemsViewModel.uiState.collectAsStateWithLifecycle(initialValue = listOf())
+
+    LaunchedEffect(isEditing) {
+        if (isEditing) {
+            delay(3000L)
+            isEditing = false
+            onAddItem()
+        }
+    }
 
     Scaffold(
         topBar = {
@@ -71,71 +78,62 @@ fun PostsScreen(onItemClick: (id: String?) -> Unit, onAddItem: () -> Unit, onLog
             )
         },
         floatingActionButton = {
-            FloatingActionButton(
+            MyFloatingActionButton(
+                isEditing = isEditing,
                 onClick = {
-                    Log.d("ItemsScreen", "add")
-                    onAddItem()
-                },
-            ) { Icon(Icons.Rounded.Add, "Add") }
+                    coroutineScope.launch {
+                        isEditing = true
+                    }
+                }
+            )
         }
-    ) {
-
-        Column(
-            modifier = Modifier.fillMaxSize()
+    ) { paddingValues ->
+        LazyColumn(
+            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 32.dp),
+            modifier = Modifier.padding(paddingValues)
         ) {
+            item { Text("Todo", style = MaterialTheme.typography.h6) }
+        }
 
-            Row() {
-
-
-                        PostList(
-                            posts = itemsUiState ,
-                            onPostClick = { postId ->
-                                // Find post by ID and handle location
-                                val post = itemsUiState.find { it.id == postId }
-                                post?.location?.let { location ->
-                                    handlePostClick(location) { location ->
-                                        selectedLocation = location
-                                        showMapDialog = true
-                                    }
-                                }
-                            },
-                            modifier = Modifier.padding(it)
-                        )
-
-
-            }
+        Column(modifier = Modifier.fillMaxSize()) {
+            PostList(
+                posts = itemsUiState,
+                onPostClick = { postId ->
+                    val post = itemsUiState.find { it.id == postId }
+                    post?.location?.let { location ->
+                        handlePostClick(location) { location ->
+                            selectedLocation = location
+                            showMapDialog = true
+                        }
+                    }
+                },
+                modifier = Modifier.padding(paddingValues)
+            )
         }
     }
+
     if (showMapDialog) {
         AlertDialog(
             onDismissRequest = { showMapDialog = false },
             title = { Text("Post Location") },
             text = {
                 selectedLocation?.let { location ->
-                    val x = Location(location.first, location.second)
-                    ShowMyLocationForPost(x, modifier = Modifier.fillMaxSize())
+                    ShowMyLocationForPost(Location(location.first, location.second), Modifier.fillMaxSize())
                 } ?: Text("Location not available")
             },
             confirmButton = {
-                Button(onClick = { showMapDialog = false }) {
-                    Text("Close")
-                }
+                Button(onClick = { showMapDialog = false }) { Text("Close") }
             }
         )
     }
+
+    EditMessage(shown = isEditing)
 }
-fun handlePostClick(location: Location?, onShowMap: (Pair<Double,Double>) -> Unit) {
-    if (location != null) {
-        val transformedLocation = transformLocation(location)
-        transformedLocation?.let {
-            onShowMap(Pair(it.latitude, it.longitude))
-        }
-    } else {
-        Log.w("PostClick", "Location is null.")
-    }
-}
-fun transformLocation(location: Location): Location? {
-    return location
+
+fun handlePostClick(location: Location?, onShowMap: (Pair<Double, Double>) -> Unit) {
+    location?.let {
+        onShowMap(Pair(it.latitude, it.longitude))
+    } ?: Log.w("PostClick", "Location is null.")
 }
 @Composable
 fun ShowMyLocationForPost(location: Location, modifier: Modifier) {
@@ -148,8 +146,36 @@ fun ShowMyLocationForPost(location: Location, modifier: Modifier) {
         myLocationViewModel.updateSelectedLocation(lat, lon)
     }
 }
+@Composable
+private fun EditMessage(shown: Boolean) {
+    AnimatedVisibility(
+        visible = shown,
+        enter = slideInVertically(
+            initialOffsetY = { fullHeight -> -fullHeight },
+            animationSpec = tween(durationMillis = 150, easing = LinearOutSlowInEasing)
+        ),
+        exit = slideOutVertically(
+            targetOffsetY = { fullHeight -> -fullHeight },
+            animationSpec = tween(durationMillis = 250, easing = FastOutLinearInEasing)
+        )
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colors.secondary,
+            elevation = 4.dp
+        ) {
+            Text("You enter in add screen", modifier = Modifier.padding(16.dp))
+        }
+    }
+}
+
+//@Composable
+//fun ShowMyLocationForPost(location: Location, modifier: Modifier) {
+//    MyMap(location.latitude, location.longitude, modifier)
+//}
+
 @Preview
 @Composable
-fun PreviewItemsScreen() {
+fun PreviewPostsScreen() {
     PostsScreen(onItemClick = {}, onAddItem = {}, onLogout = {})
 }

@@ -58,6 +58,7 @@ import com.google.maps.android.compose.Marker
 import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull.content
 import java.io.InputStream
@@ -104,6 +105,7 @@ fun PostAddScreen(onClose: () -> Unit) {
     val cameraPositionState = rememberCameraPositionState {
         position = CameraPosition.fromLatLngZoom(markerState.position, 10f)
     }
+
     LaunchedEffect(Unit) {
         scope.launch {
             user = userPreferencesRepository.getUser()?:User("","",0)
