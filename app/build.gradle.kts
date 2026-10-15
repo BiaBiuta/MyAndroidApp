@@ -75,7 +75,8 @@ dependencies {
     // Room
     implementation("androidx.work:work-runtime-ktx:2.7.1")
     implementation("androidx.room:room-runtime:2.6.0")
-    kapt("androidx.room:room-compiler:2.6.0")
+//    implementation(libs.androidx.ui.desktop)
+     kapt("androidx.room:room-compiler:2.6.0")
     implementation("com.google.accompanist:accompanist-permissions:0.23.1")
 
     implementation("com.google.android.gms:play-services-location:21.0.1")
@@ -103,6 +104,8 @@ implementation(libs.androidx.room.ktx)
     implementation ("androidx.compose.ui:ui:1.4.0")
     implementation ("androidx.compose.material:material:1.4.0")
     implementation ("androidx.compose.material3:material3:1.0.0")
-
+    implementation("androidx.compose.material:material-icons-core")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.biometric:biometric:1.2.0-alpha05")
 
 }

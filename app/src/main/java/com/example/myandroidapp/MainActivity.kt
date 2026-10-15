@@ -13,7 +13,9 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.lifecycleScope
 import com.example.myandroidapp.MyAppNavHost
 import com.example.myandroidapp.MyApplication
@@ -26,18 +28,23 @@ import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.ilazar.myapp3.util.RequirePermissions
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     @RequiresApi(Build.VERSION_CODES.O)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            Log.d(TAG, "onCreate")
-            MyApp {
-                MyAppNavHost()
-            }
-        }
-    }
 
+        // Înlocuitor direct pentru setContent care funcționează 100% pe FragmentActivity:
+        setContentView(
+            ComposeView(this).apply {
+                setContent {
+                    Log.d(TAG, "onCreate")
+                    MyApp {
+                        MyAppNavHost()
+                    }
+                }
+            }
+        )
+    }
     override fun onResume() {
         super.onResume()
         lifecycleScope.launch {
@@ -67,7 +74,7 @@ fun MyApp(content: @Composable () -> Unit) {
 
             // Exemplu: Adăugare `DeviceSensors` sau alte componente
             //DeviceSensors(modifier = Modifier.padding(innerPadding))
-            ProximitySensor(modifier = Modifier.padding(innerPadding))
+           // ProximitySensor(modifier = Modifier.padding(innerPadding))
         }
     }
 }

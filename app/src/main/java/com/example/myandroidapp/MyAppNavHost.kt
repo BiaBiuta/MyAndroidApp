@@ -85,9 +85,11 @@ fun MyAppNavHost() {
         composable(route = authRoute)
         {
             LoginScreen(
-                onClose = {
+                onLoginSuccess = {
                     Log.d("MyAppNavHost", "navigate to list")
-                    navController.navigate(postsRoute)
+                    navController.navigate(postsRoute){
+                        popUpTo(authRoute) { inclusive = true }
+                    }
                 }
             )
         }
