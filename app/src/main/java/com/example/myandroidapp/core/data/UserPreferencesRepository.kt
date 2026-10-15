@@ -3,6 +3,7 @@ package com.example.myandroidapp.core.data
 import android.util.Log
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
@@ -20,6 +21,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val userKey = stringPreferencesKey("user")
         val email = stringPreferencesKey("email")
         val token = stringPreferencesKey("token")
+        val biometricEnabled = booleanPreferencesKey("biometric_enabled")
     }
 
     init {
@@ -45,6 +47,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             preferences[PreferencesKeys.email] = userPreferences.email
             preferences[PreferencesKeys.token] = userPreferences.token
             preferences[PreferencesKeys.userKey] = userJson
+            preferences[PreferencesKeys.biometricEnabled] = userPreferences.biometricEnabled
         }
     }
 
@@ -75,6 +78,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val userJson = preferences[PreferencesKeys.userKey] ?: ""
         val email = preferences[PreferencesKeys.email] ?: ""
         val token = preferences[PreferencesKeys.token] ?: ""
+        val biometricEnabled = preferences[PreferencesKeys.biometricEnabled] ?: false
 
         val user = if (userJson.isNotEmpty()) {
             Gson().fromJson(userJson, User::class.java)  // Deserializare JSON în User
@@ -85,7 +89,8 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         return UserPreferences(
             email = email,
             token = token,
-            user = user
+            user = user,
+            biometricEnabled = biometricEnabled
         )
     }
 }

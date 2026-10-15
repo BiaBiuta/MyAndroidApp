@@ -9,28 +9,76 @@ import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
+import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.todo.data.PostRepository
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+
+/**
+ * Starea sesiunii:
+ *  - Loading   : inca citim DataStore-ul
+ *  - LoggedOut : nu exista token -> doar login cu e-mail si parola
+ *  - Locked    : exista token + amprenta activata, dar inca nu s-a deblocat in aceasta deschidere
+ *  - Active    : sesiune deblocata, se poate intra in ecranul principal
+ */
+sealed interface SessionState {
+    data object Loading : SessionState
+    data object LoggedOut : SessionState
+    data object Locked : SessionState
+    data class Active(val token: String) : SessionState
+}
 
 class MyAppViewModel(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val postRepository: PostRepository
 ) : ViewModel() {
 
+    // Traieste cat traieste Activity-ul: la inchiderea si redeschiderea aplicatiei
+    // ViewModel-ul e nou -> unlocked = false -> se cere din nou amprenta.
+    private val unlocked = MutableStateFlow(false)
+
+    val sessionState: StateFlow<SessionState> =
+        combine(userPreferencesRepository.userPreferencesStream, unlocked) { prefs, isUnlocked ->
+            when {
+                prefs.token.isEmpty() -> SessionState.LoggedOut
+                prefs.biometricEnabled && !isUnlocked -> SessionState.Locked
+                else -> SessionState.Active(prefs.token)
+            }
+        }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionState.Loading)
+
     init {
         Log.d(TAG, "init")
     }
-    fun logout(){
-        viewModelScope.launch{
-            postRepository.deleteAll()
-            userPreferencesRepository.save(UserPreferences())//i will set them on null
+
+    /** Apelat dupa login cu e-mail/parola sau dupa amprenta acceptata. */
+    fun unlock() {
+        unlocked.value = true
+    }
+
+    /** Sterge complet sesiunea si token-ul, apoi apeleaza onLoggedOut (navigare la login). */
+    fun logout(onLoggedOut: () -> Unit) {
+        viewModelScope.launch {
+            // token, user si flag-ul biometric sunt sterse (UserPreferences() = valori goale)
+            userPreferencesRepository.save(UserPreferences())
+            Api.tokenInterceptor.token = null
+            unlocked.value = false
+            try {
+                postRepository.deleteAll()
+            } catch (e: Exception) {
+                Log.w(TAG, "deleteAll failed", e)
+            }
+            onLoggedOut()
         }
     }
-    fun setToken(token:String){
+
+    fun setToken(token: String) {
         postRepository.setToken(token)
     }
-    //a static object unique in this class = singleton behavior in java
-    //for correct dependency injection
+
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

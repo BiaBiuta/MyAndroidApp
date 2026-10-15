@@ -6,7 +6,7 @@ plugins {
     alias(libs.plugins.google.ksp)
 
     id("org.jetbrains.kotlin.plugin.parcelize")
-    id("kotlin-kapt")
+
 
 }
 ksp {
@@ -74,9 +74,11 @@ dependencies {
     implementation(libs.okhttp.logging.interceptor)
     // Room
     implementation("androidx.work:work-runtime-ktx:2.7.1")
-    implementation("androidx.room:room-runtime:2.6.0")
+
+    implementation(libs.play.services.cast)
 //    implementation(libs.androidx.ui.desktop)
-     kapt("androidx.room:room-compiler:2.6.0")
+//     kapt("androidx.room:room-compiler:2.6.0")
+//    implementation("androidx.room:room-runtime:2.6.0")
     implementation("com.google.accompanist:accompanist-permissions:0.23.1")
 
     implementation("com.google.android.gms:play-services-location:21.0.1")
@@ -85,7 +87,9 @@ dependencies {
 //    implementation(libs.androidx.room.runtime)
 //    implementation(libs.androidx.adapters)
 //    ksp(libs.androidx.room.compiler)
-implementation(libs.androidx.room.ktx)
+    implementation(libs.androidx.room.runtime)
+    ksp(libs.androidx.room.compiler)
+    implementation(libs.androidx.room.ktx)
     // Data store
     implementation(libs.androidx.datastore.preferences)
     testImplementation(libs.junit)

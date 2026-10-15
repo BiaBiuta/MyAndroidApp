@@ -1,9 +1,14 @@
 package com.example.myandroidapp.auth
 
 import android.app.Application
-import android.content.Context
+import android.util.Log
+import androidx.biometric.BiometricManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
+import com.example.myandroidapp.MyApplication
+import com.example.myandroidapp.auth.data.remote.User
+import com.example.myandroidapp.core.TAG
+import com.example.myandroidapp.core.data.UserPreferences
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -23,23 +28,27 @@ data class LoginUiState(
     val authenticationError: Throwable? = null,
     val generalErrorMessage: String? = null,
     val isSuccess: Boolean = false,
-    val showBiometricOnboardingPrompt: Boolean = false,
-    val isBiometricsEnabled: Boolean = false,
-    val showBiometricAuthDialog: Boolean = false,
-    val biometricErrorMessage: String? = null
+    // dialogul "Activează autentificarea biometrică" de dupa login
+    val showBiometricOnboardingPrompt: Boolean = false
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
-    private val prefs = application.getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
+    private val container = (application as MyApplication).container
+    private val authRepository = container.authRepository
+    private val userPreferencesRepository = container.userPreferencesRepository
 
-    private val _uiState = MutableStateFlow(
-        LoginUiState(
-            // Citim starea salvată pe disc
-            isBiometricsEnabled = prefs.getBoolean("biometrics_enabled", false)
-        )
-    )
+    // Sesiunea (token + user) primita la login. O salvam abia dupa ce utilizatorul
+    // raspunde la dialogul de activare a amprentei, impreuna cu alegerea lui.
+    private var pendingSession: UserPreferences? = null
+
+    private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
+
+    private fun biometricAvailable(): Boolean =
+        BiometricManager.from(getApplication())
+            .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+                BiometricManager.BIOMETRIC_SUCCESS
 
     fun toggleAuthMode() {
         _uiState.update {
@@ -93,7 +102,12 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    fun submitEmailAuth(onSuccess: () -> Unit) {
+    /**
+     * @param onSessionUnlocked sesiunea e deblocata (login cu e-mail si parola reusit).
+     *        Navigarea o face MyAppNavHost cand sesiunea salvata devine activa.
+     * @param onEnterWithoutSession intrare fara sesiune salvata (inregistrare demo).
+     */
+    fun submitEmailAuth(onSessionUnlocked: () -> Unit, onEnterWithoutSession: () -> Unit) {
         val state = _uiState.value
         var hasError = false
 
@@ -127,85 +141,91 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
-            delay(800)
 
-            if (state.email.contains("error")) {
+            if (!state.isLoginMode) {
+                // Serverul nu are endpoint de inregistrare: pastram comportamentul demo de dinainte.
+                delay(800)
+                _uiState.update { it.copy(isAuthenticating = false) }
+                onEnterWithoutSession()
+                return@launch
+            }
+
+            val result = authRepository.login(state.email, state.password)
+            val tokenHolder = result.getOrNull()
+            val error = result.exceptionOrNull()
+
+            val session: UserPreferences? = when {
+                // Serverul a raspuns cu token -> sesiune reala
+                tokenHolder != null -> UserPreferences(
+                    email = state.email,
+                    token = tokenHolder.token,
+                    user = tokenHolder.user
+                )
+                // Serverul nu poate fi contactat (oprit / alt IP) -> sesiune locala demo
+                error is java.io.IOException && !state.email.contains("error") -> UserPreferences(
+                    email = state.email,
+                    token = "local-" + java.util.UUID.randomUUID().toString(),
+                    user = User(state.email, "", 0)
+                )
+                // Serverul a raspuns, dar a respins datele (ex. 401) -> login esuat
+                else -> null
+            }
+
+            if (session == null) {
+                Log.w(TAG, "login failed", error)
                 _uiState.update {
                     it.copy(
                         isAuthenticating = false,
+                        authenticationError = error,
                         generalErrorMessage = "Date de autentificare incorecte. Verificați e-mailul sau parola."
                     )
                 }
-            } else {
-                _uiState.update { it.copy(isAuthenticating = false) }
+                return@launch
+            }
+            _uiState.update { it.copy(isAuthenticating = false) }
 
-                // Dacă nu a fost activată anterior biometria, afișează dialogul de onboarding
-                if (!_uiState.value.isBiometricsEnabled) {
-                    _uiState.update { it.copy(showBiometricOnboardingPrompt = true) }
-                } else {
-                    onSuccess()
-                }
+            if (biometricAvailable()) {
+                // Prima conectare -> intrebam daca activeaza amprenta
+                pendingSession = session
+                _uiState.update { it.copy(showBiometricOnboardingPrompt = true) }
+            } else {
+                onSessionUnlocked()
+                userPreferencesRepository.save(session)
             }
         }
     }
 
-    fun signInWithProvider(provider: String, onSuccess: () -> Unit) {
+    // Google / Apple / anonim sunt demo si nu au token, deci nu creeaza o sesiune salvata:
+    // nu pot fi deblocate ulterior cu amprenta.
+    fun signInWithProvider(provider: String, onEnterWithoutSession: () -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
             delay(600)
             _uiState.update { it.copy(isAuthenticating = false) }
-
-            if (!_uiState.value.isBiometricsEnabled) {
-                _uiState.update { it.copy(showBiometricOnboardingPrompt = true) }
-            } else {
-                onSuccess()
-            }
+            onEnterWithoutSession()
         }
     }
 
-    fun signInAnonymously(onSuccess: () -> Unit) {
+    fun signInAnonymously(onEnterWithoutSession: () -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
             delay(400)
             _uiState.update { it.copy(isAuthenticating = false) }
-            onSuccess()
+            onEnterWithoutSession()
         }
     }
 
-    // Apăsarea pe iconița de amprentă de pe ecran deschide direct scanarea
-    fun onBiometricIconClicked() {
-        _uiState.update {
-            it.copy(
-                showBiometricAuthDialog = true,
-                biometricErrorMessage = null
+    /** Raspunsul la dialogul "Activează autentificarea biometrică". */
+    fun setBiometricsEnabled(enable: Boolean, onSessionUnlocked: () -> Unit) {
+        _uiState.update { it.copy(showBiometricOnboardingPrompt = false) }
+        val session = pendingSession ?: return
+        pendingSession = null
+        // Deblocam inainte sa salvam, ca sa nu se ridice imediat sheet-ul de amprenta.
+        onSessionUnlocked()
+        viewModelScope.launch {
+            userPreferencesRepository.save(
+                UserPreferences(session.email, session.token, session.user, biometricEnabled = enable)
             )
         }
-    }
-
-    // Salvează persistent activarea biometriei după primul login
-    fun setBiometricsEnabled(enable: Boolean, onDone: () -> Unit) {
-        prefs.edit().putBoolean("biometrics_enabled", enable).apply()
-        _uiState.update {
-            it.copy(
-                isBiometricsEnabled = enable,
-                showBiometricOnboardingPrompt = false
-            )
-        }
-        onDone()
-    }
-
-    fun onBiometricSuccess(onSuccess: () -> Unit) {
-        _uiState.update { it.copy(showBiometricAuthDialog = false) }
-        onSuccess()
-    }
-
-    fun onBiometricFailed() {
-        _uiState.update {
-            it.copy(biometricErrorMessage = "Amprentă / Față nerecunoscută. Încercați din nou sau folosiți parola.")
-        }
-    }
-
-    fun dismissBiometricDialog() {
-        _uiState.update { it.copy(showBiometricAuthDialog = false, biometricErrorMessage = null) }
     }
 }

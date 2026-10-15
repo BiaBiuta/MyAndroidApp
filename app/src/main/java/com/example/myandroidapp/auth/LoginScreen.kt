@@ -56,9 +56,18 @@ fun Context.findFragmentActivity(): FragmentActivity? {
     return null
 }
 
+/**
+ * @param sessionLocked exista o sesiune salvata (token) cu amprenta activata, care asteapta
+ *        deblocarea. Doar atunci amprenta poate deschide aplicatia.
+ * @param onSessionUnlocked login cu parola reusit sau amprenta acceptata -> sesiunea e deblocata;
+ *        MyAppNavHost navigheaza in ecranul principal cand sesiunea devine activa.
+ * @param onEnterWithoutSession intrare demo fara token (Google / Apple / anonim / inregistrare).
+ */
 @Composable
 fun LoginScreen(
-    onLoginSuccess: () -> Unit,
+    sessionLocked: Boolean,
+    onSessionUnlocked: () -> Unit,
+    onEnterWithoutSession: () -> Unit,
     viewModel: LoginViewModel = viewModel()
 ) {
     val state by viewModel.uiState.collectAsState()
@@ -67,6 +76,17 @@ fun LoginScreen(
     var passwordVisible by remember { mutableStateOf(false) }
 
     fun launchNativeBiometricPrompt() {
+        // Fara sesiune activa (inainte de primul login sau dupa Logout) amprenta e refuzata,
+        // ca nimeni sa nu poata intra doar cu amprenta fara sa se fi logat mai intai.
+        if (!sessionLocked) {
+            Toast.makeText(
+                context,
+                "Nu există o sesiune activă. Vă rugăm să vă conectați cu e-mail și parolă.",
+                Toast.LENGTH_LONG
+            ).show()
+            return
+        }
+
         val activity = context.findFragmentActivity()
         if (activity == null) {
             Toast.makeText(context, "Eroare: Activitatea nu permite afișarea biometriei.", Toast.LENGTH_SHORT).show()
@@ -98,9 +118,9 @@ fun LoginScreen(
 
         val executor = ContextCompat.getMainExecutor(context)
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Autentificare WanderLog")
-            .setSubtitle("Atingeți senzorul de amprentă")
-            .setNegativeButtonText("Folosește parola")
+            .setTitle("Deblocare WanderLog")
+            .setSubtitle("Atingeți senzorul pentru a debloca sesiunea curentă")
+            .setNegativeButtonText("Folosește e-mail și parola")
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
 
@@ -110,13 +130,15 @@ fun LoginScreen(
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
-                    Toast.makeText(context, "Autentificare reușită!", Toast.LENGTH_SHORT).show()
-                    onLoginSuccess()
+                    onSessionUnlocked()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON && errorCode != BiometricPrompt.ERROR_USER_CANCELED) {
+                    if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON &&
+                        errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
+                        errorCode != BiometricPrompt.ERROR_CANCELED
+                    ) {
                         Toast.makeText(context, "$errString", Toast.LENGTH_SHORT).show()
                     }
                 }
@@ -263,7 +285,7 @@ fun LoginScreen(
                         onNext = { focusManager.moveFocus(FocusDirection.Down) },
                         onDone = {
                             focusManager.clearFocus()
-                            viewModel.submitEmailAuth(onLoginSuccess)
+                            viewModel.submitEmailAuth(onSessionUnlocked, onEnterWithoutSession)
                         }
                     ),
                     modifier = Modifier.fillMaxWidth(),
@@ -291,7 +313,7 @@ fun LoginScreen(
                             keyboardActions = KeyboardActions(
                                 onDone = {
                                     focusManager.clearFocus()
-                                    viewModel.submitEmailAuth(onLoginSuccess)
+                                    viewModel.submitEmailAuth(onSessionUnlocked, onEnterWithoutSession)
                                 }
                             ),
                             modifier = Modifier.fillMaxWidth(),
@@ -309,7 +331,7 @@ fun LoginScreen(
                     Button(
                         onClick = {
                             focusManager.clearFocus()
-                            viewModel.submitEmailAuth(onLoginSuccess)
+                            viewModel.submitEmailAuth(onSessionUnlocked, onEnterWithoutSession)
                         },
                         modifier = Modifier
                             .weight(1f)
@@ -371,7 +393,7 @@ fun LoginScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 OutlinedButton(
-                    onClick = { viewModel.signInWithProvider("Google", onLoginSuccess) },
+                    onClick = { viewModel.signInWithProvider("Google", onEnterWithoutSession) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -396,7 +418,7 @@ fun LoginScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 Button(
-                    onClick = { viewModel.signInWithProvider("Apple", onLoginSuccess) },
+                    onClick = { viewModel.signInWithProvider("Apple", onEnterWithoutSession) },
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp),
@@ -416,7 +438,7 @@ fun LoginScreen(
                 Spacer(modifier = Modifier.height(10.dp))
 
                 TextButton(
-                    onClick = { viewModel.signInAnonymously(onLoginSuccess) },
+                    onClick = { viewModel.signInAnonymously(onEnterWithoutSession) },
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -441,9 +463,15 @@ fun LoginScreen(
         }
     }
 
+    // La redeschiderea aplicatiei (sesiune salvata + amprenta activata) se ridica automat
+    // sheet-ul nativ de amprenta.
+    LaunchedEffect(sessionLocked) {
+        if (sessionLocked) launchNativeBiometricPrompt()
+    }
+
     if (state.showBiometricOnboardingPrompt) {
         AlertDialog(
-            onDismissRequest = { viewModel.setBiometricsEnabled(false, onLoginSuccess) },
+            onDismissRequest = { viewModel.setBiometricsEnabled(false, onSessionUnlocked) },
             icon = {
                 Icon(
                     imageVector = Icons.Default.Fingerprint,
@@ -457,12 +485,12 @@ fun LoginScreen(
                 Text("Doriți să vă conectați mai rapid și în siguranță data viitoare folosind amprenta sau recunoașterea facială?")
             },
             confirmButton = {
-                Button(onClick = { viewModel.setBiometricsEnabled(true, onLoginSuccess) }) {
+                Button(onClick = { viewModel.setBiometricsEnabled(true, onSessionUnlocked) }) {
                     Text("Activează")
                 }
             },
             dismissButton = {
-                TextButton(onClick = { viewModel.setBiometricsEnabled(false, onLoginSuccess) }) {
+                TextButton(onClick = { viewModel.setBiometricsEnabled(false, onSessionUnlocked) }) {
                     Text("Nu acum")
                 }
             }
