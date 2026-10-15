@@ -16,7 +16,10 @@ data class Post(
     var created_at: String="",  // Consistent cu `updated_at`
     var updated_at: String="",
     var isNotSaved: Boolean=false,
-    var location: Location=Location() // Se definește separat
+    var location: Location=Location(), // Se definește separat,
+    // Postare privata: se pastreaza doar local, pe telefon, si e vizibila doar
+    // proprietarului (user_id), in sectiunea privata, dupa re-autentificare.
+    var isPrivate: Boolean=false
 )
 
 

@@ -25,7 +25,7 @@ class PostRepository(
     private val postService: PostService,
     private val postWsClient: PostWsClient,
     private val itemDao: ItemDao
-    ) {
+) {
     private var posts: kotlin.collections.List<Post> = kotlin.collections.listOf()
 
     private fun getBearerToken() = "Bearer ${Api.tokenInterceptor.token}"
@@ -35,7 +35,22 @@ class PostRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
+    // Doar postarile publice (lista principala)
     val itemStream by lazy { itemDao.getAll() }
+
+    // Doar postarile private ale proprietarului dat (sectiunea privata)
+    fun privateItemStream(ownerKey: String): Flow<List<Post>> = itemDao.getPrivate(ownerKey)
+
+    /** Postare privata: se salveaza doar local, nu ajunge niciodata pe server. */
+    suspend fun savePrivate(post: Post): Post {
+        val privatePost = post.copy(
+            id = post.id.ifEmpty { "private-" + java.util.UUID.randomUUID().toString() },
+            isPrivate = true,
+            isNotSaved = false
+        )
+        itemDao.insert(privatePost)
+        return privatePost
+    }
 
     init {
         Log.d(TAG, "init")
@@ -59,9 +74,10 @@ class PostRepository(
         try {
 
             posts = postService.find(authorization = getBearerToken())
-            itemDao.deleteAll()
+            // inlocuim doar postarile publice; cele private (locale) raman
+            itemDao.deleteAllPublic()
             Log.d(TAG, "refresh succeeded")
-            posts.forEach{itemDao.insert(it)}
+            posts.forEach{itemDao.insert(it.copy(isPrivate = false))}
 //            postsFlow.emit(Result.Success(posts))
         } catch (e: Exception) {
             Log.w(TAG, "refresh failed", e)
@@ -166,15 +182,18 @@ class PostRepository(
 //        posts = listOf(post) + posts
 //        //Log.d(posts.toString(),"posts")
 //        postsFlow.emit(Result.Success(posts))
-        itemDao.insert(post)
+        // ce vine de pe server / WebSocket e mereu public
+        itemDao.insert(post.copy(isPrivate = false))
     }
     suspend fun saveToLocal(post: Post) {
         itemDao.insert(post) // `postDao` reprezintă DAO-ul pentru entitatea `Post`
     }
 
 
+    /** La Logout: stergem postarile publice din cache. Cele private raman pe telefon,
+     *  ascunse; le vede doar proprietarul lor, dupa ce se logheaza din nou. */
     suspend fun deleteAll() {
-        itemDao.deleteAll()
+        itemDao.deleteAllPublic()
     }
 
     fun setToken(token: String) {

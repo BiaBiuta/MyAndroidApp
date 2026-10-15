@@ -12,7 +12,8 @@ import com.example.myandroidapp.todo.data.Post
 
 import com.example.myapp.todo.data.local.ItemDao
 @TypeConverters(Converters::class)
-@Database(entities = arrayOf(Post::class), version = 2)
+// version 3: coloana noua isPrivate (fallbackToDestructiveMigration recreeaza baza locala)
+@Database(entities = arrayOf(Post::class), version = 3)
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
 

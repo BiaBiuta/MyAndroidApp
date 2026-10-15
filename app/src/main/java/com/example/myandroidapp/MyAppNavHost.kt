@@ -4,8 +4,12 @@ import android.os.Build
 import android.util.Log
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
@@ -14,12 +18,15 @@ import androidx.navigation.compose.rememberNavController
 import com.example.myandroidapp.auth.LoginScreen
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.todo.ui.post.PostAddScreen
+import com.example.myandroidapp.todo.ui. privateposts.PrivatePostsScreen
 import com.example.myapplication.todo.ui.items.PostsScreen
-
+// ATENTIE: SessionState e cel din MyAppViewModel.kt (acelasi pachet), NU importati
+// com.google.android.gms.cast.SessionState daca Android Studio il propune.
 
 
 val postsRoute = "posts"
 val authRoute = "auth"
+val privateRoute = "private"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -33,6 +40,20 @@ fun MyAppNavHost() {
     // myAppViewModel gestioneaza sesiunea: blocare/deblocare cu amprenta, logout, token
     val myAppViewModel = viewModel<MyAppViewModel>(factory = MyAppViewModel.Factory)
     val sessionState by myAppViewModel.sessionState.collectAsStateWithLifecycle()
+
+    // Urmarim cand aplicatia trece in fundal / revine (ex. butonul Home)
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> myAppViewModel.onAppBackground()
+                Lifecycle.Event.ON_START -> myAppViewModel.onAppForeground()
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     NavHost(
         navController = navController,
@@ -56,12 +77,31 @@ fun MyAppNavHost() {
                             popUpTo(0)
                         }
                     }
+                },
+                onOpenPrivate = {
+                    Log.d("MyAppNavHost", "navigate to private section")
+                    navController.navigate(privateRoute)
                 })
         }
         composable(route = "$postsRoute-new")
         {
             PostAddScreen(
                 onClose = { onClose() }
+            )
+        }
+        // Adaugare din sectiunea privata: comutatorul "Postare privată" e pornit implicit
+        composable(route = "$postsRoute-new-private")
+        {
+            PostAddScreen(
+                onClose = { onClose() },
+                isPrivateInitially = true
+            )
+        }
+        composable(route = privateRoute)
+        {
+            PrivatePostsScreen(
+                onBack = { navController.popBackStack() },
+                onAddPrivatePost = { navController.navigate("$postsRoute-new-private") }
             )
         }
         composable(route = authRoute)
@@ -79,19 +119,30 @@ fun MyAppNavHost() {
         }
     }
 
-    // Cand sesiunea e activa (login cu parola, amprenta acceptata, sau sesiune salvata
-    // fara amprenta) setam token-ul si intram in ecranul principal.
     LaunchedEffect(sessionState) {
-        val state = sessionState
-        if (state is SessionState.Active) {
-            Log.d("MyAppNavHost", "session active, navigate to items")
-            Api.tokenInterceptor.token = state.token
-            myAppViewModel.setToken(state.token)
-            if (navController.currentDestination?.route == authRoute) {
-                navController.navigate(postsRoute) {
-                    popUpTo(0)
+        when (val state = sessionState) {
+            // Sesiune activa (login cu parola, amprenta acceptata, sau sesiune salvata
+            // fara amprenta) -> setam token-ul si intram in ecranul principal
+            is SessionState.Active -> {
+                Log.d("MyAppNavHost", "session active, navigate to items")
+                Api.tokenInterceptor.token = state.token
+                myAppViewModel.setToken(state.token)
+                if (navController.currentDestination?.route == authRoute) {
+                    navController.navigate(postsRoute) {
+                        popUpTo(0)
+                    }
                 }
             }
+            // Sesiunea s-a blocat (revenire din fundal) -> inapoi la login,
+            // unde se ridica automat sheet-ul de amprenta
+            is SessionState.Locked -> {
+                if (navController.currentDestination?.route != authRoute) {
+                    navController.navigate(authRoute) {
+                        popUpTo(0)
+                    }
+                }
+            }
+            else -> {}
         }
     }
 }

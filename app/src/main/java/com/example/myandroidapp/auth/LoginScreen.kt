@@ -1,8 +1,14 @@
 package com.example.myandroidapp.auth
 
+import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
+import android.content.Intent
+import android.os.Build
+import android.provider.Settings
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.AnimatedVisibility
@@ -56,6 +62,18 @@ fun Context.findFragmentActivity(): FragmentActivity? {
     return null
 }
 
+/** Ecranul de sistem pentru adaugarea unei amprente, in functie de versiunea Android. */
+private fun biometricEnrollIntent(): Intent = when {
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.R ->
+        Intent(Settings.ACTION_BIOMETRIC_ENROLL).putExtra(
+            Settings.EXTRA_BIOMETRIC_AUTHENTICATORS_ALLOWED,
+            BiometricManager.Authenticators.BIOMETRIC_STRONG
+        )
+    Build.VERSION.SDK_INT >= Build.VERSION_CODES.P ->
+        @Suppress("DEPRECATION") Intent(Settings.ACTION_FINGERPRINT_ENROLL)
+    else -> Intent(Settings.ACTION_SECURITY_SETTINGS)
+}
+
 /**
  * @param sessionLocked exista o sesiune salvata (token) cu amprenta activata, care asteapta
  *        deblocarea. Doar atunci amprenta poate deschide aplicatia.
@@ -74,6 +92,13 @@ fun LoginScreen(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     var passwordVisible by remember { mutableStateOf(false) }
+
+    // Cand revine din Setari (adaugare amprenta), verificam daca si-a adaugat-o
+    val enrollLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) {
+        viewModel.onEnrollmentFinished(onSessionUnlocked)
+    }
 
     fun launchNativeBiometricPrompt() {
         // Fara sesiune activa (inainte de primul login sau dupa Logout) amprenta e refuzata,
@@ -482,11 +507,26 @@ fun LoginScreen(
             },
             title = { Text("Activează autentificarea biometrică") },
             text = {
-                Text("Doriți să vă conectați mai rapid și în siguranță data viitoare folosind amprenta sau recunoașterea facială?")
+                Text(
+                    if (state.biometricNeedsEnrollment)
+                        "Pe acest telefon nu este înregistrată nicio amprentă. Adaugă una acum, iar data viitoare îți vei putea debloca sesiunea doar cu amprenta."
+                    else
+                        "Doriți să vă conectați mai rapid și în siguranță data viitoare folosind amprenta?"
+                )
             },
             confirmButton = {
-                Button(onClick = { viewModel.setBiometricsEnabled(true, onSessionUnlocked) }) {
-                    Text("Activează")
+                Button(onClick = {
+                    if (state.biometricNeedsEnrollment) {
+                        try {
+                            enrollLauncher.launch(biometricEnrollIntent())
+                        } catch (e: ActivityNotFoundException) {
+                            enrollLauncher.launch(Intent(Settings.ACTION_SECURITY_SETTINGS))
+                        }
+                    } else {
+                        viewModel.setBiometricsEnabled(true, onSessionUnlocked)
+                    }
+                }) {
+                    Text(if (state.biometricNeedsEnrollment) "Adaugă amprenta" else "Activează")
                 }
             },
             dismissButton = {

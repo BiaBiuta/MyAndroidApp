@@ -60,13 +60,13 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                     return@collect
                 }
 
-                    val post =posts.find { it.id==postId }?:Post()
-                    uiState = uiState.copy(post = post, loadResult = Result.Success(post))
+                val post =posts.find { it.id==postId }?:Post()
+                uiState = uiState.copy(post = post, loadResult = Result.Success(post))
 
-                }
-                //val item = items.find { it.id == itemId } ?: Post()
             }
+            //val item = items.find { it.id == itemId } ?: Post()
         }
+    }
 
     private fun savePhotoToFile(context: Application, photoData: String): String {
         val file = File(context.filesDir, "photo_${System.currentTimeMillis()}.txt")
@@ -87,21 +87,21 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                 val updatedAt = java.util.Date().toInstant().toString() // Data curentă pentru updated_at
 
                 val location = Location(selectedLocation.latitude,selectedLocation.longitude)
-                   ?: Location( 47.0,  48.0)
+                    ?: Location( 47.0,  48.0)
                 Log.d(TAG, "saveOrUpdateItem...location=${location.latitude},${location.longitude}");
                 val postId=uiState.postId
                 val item = uiState.post.copy(
-                     photo=photo?:"",
-                 description=description?:"",
-                 user_id=user_id?:"",
-                 user_profile_photo=user_profile_photo?:"",
-                 user_last_name=user_last_name?:"",
-                 user_first_name=user_first_name?:"",
-                 professional=false,
-                 created_at= createdAt,  // Consistent cu `updated_at`
-                 updated_at=updatedAt,
-                 //isNotSaved: Boolean=false,
-                 location=location 
+                    photo=photo?:"",
+                    description=description?:"",
+                    user_id=user_id?:"",
+                    user_profile_photo=user_profile_photo?:"",
+                    user_last_name=user_last_name?:"",
+                    user_first_name=user_first_name?:"",
+                    professional=false,
+                    created_at= createdAt,  // Consistent cu `updated_at`
+                    updated_at=updatedAt,
+                    //isNotSaved: Boolean=false,
+                    location=location
                 )
                 val constraints = Constraints.Builder()
 
@@ -135,6 +135,36 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                 uiState = uiState.copy(submitResult = Result.Success(item))
             } catch (e: Exception) {
                 Log.d(TAG, "saveOrUpdateItem failed");
+                uiState = uiState.copy(submitResult = Result.Error(e))
+            }
+        }
+    }
+
+    /**
+     * Postare privata: se salveaza direct in baza locala (nu prin ServerWorker),
+     * deci nu ajunge niciodata pe server si nu o pot vedea alti utilizatori.
+     */
+    @RequiresApi(Build.VERSION_CODES.O)
+    fun savePrivatePost(photo: String, description: String, ownerKey: String, selectedLocation: Location) {
+        viewModelScope.launch {
+            try {
+                uiState = uiState.copy(submitResult = Result.Loading)
+                val now = java.util.Date().toInstant().toString()
+                val saved = itemRepository.savePrivate(
+                    Post(
+                        photo = photo,
+                        description = description,
+                        user_id = ownerKey,
+                        created_at = now,
+                        updated_at = now,
+                        location = Location(selectedLocation.latitude, selectedLocation.longitude),
+                        isPrivate = true
+                    )
+                )
+                Log.d(TAG, "savePrivatePost succeeded ${saved.id}")
+                uiState = uiState.copy(submitResult = Result.Success(saved))
+            } catch (e: Exception) {
+                Log.d(TAG, "savePrivatePost failed", e)
                 uiState = uiState.copy(submitResult = Result.Error(e))
             }
         }

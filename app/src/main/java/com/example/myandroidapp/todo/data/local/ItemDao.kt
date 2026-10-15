@@ -11,8 +11,13 @@ import kotlinx.coroutines.flow.Flow
 
 @Dao
 interface ItemDao {
-    @Query("SELECT * FROM Posts ORDER BY created_at DESC")
+    // Lista principala: DOAR postarile publice. Postarile private nu apar aici niciodata.
+    @Query("SELECT * FROM Posts WHERE isPrivate = 0 ORDER BY created_at DESC")
     fun getAll(): Flow<List<Post>>
+
+    // Sectiunea privata: doar postarile private ale proprietarului dat.
+    @Query("SELECT * FROM Posts WHERE isPrivate = 1 AND user_id = :ownerKey ORDER BY created_at DESC")
+    fun getPrivate(ownerKey: String): Flow<List<Post>>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(item: Post)
@@ -23,9 +28,13 @@ interface ItemDao {
     @Update
     suspend fun update(item: Post): Int
 
-    @Query("DELETE FROM Posts")
-    suspend fun deleteAll(): Unit
-    @Query("SELECT * FROM Posts WHERE isNotSaved = 1")
+    // Sterge doar postarile publice (cele venite de pe server). Cele private raman,
+    // ca utilizatorul sa le regaseasca dupa ce se logheaza din nou.
+    @Query("DELETE FROM Posts WHERE isPrivate = 0")
+    suspend fun deleteAllPublic(): Unit
+
+    // Postarile private nu se trimit niciodata pe server
+    @Query("SELECT * FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0")
     suspend fun getUnsyncedItems(): List<Post>
 
     @Query("UPDATE Posts SET isNotSaved = 0 WHERE id = :id")

@@ -59,6 +59,7 @@ import com.google.maps.android.compose.MarkerState
 import com.google.maps.android.compose.rememberCameraPositionState
 import com.google.maps.android.compose.rememberMarkerState
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonNull.content
 import java.io.InputStream
@@ -79,8 +80,12 @@ class PostAddActivity : ComponentActivity() {
 @RequiresApi(Build.VERSION_CODES.O)
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PostAddScreen(onClose: () -> Unit) {
+fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
     val postViewModel = viewModel<PostViewModel>(factory = PostViewModel.Factory(""))
+    // Postare privata = salvata doar local, vizibila doar proprietarului in sectiunea privata
+    var isPrivate by rememberSaveable { mutableStateOf(isPrivateInitially) }
+    // Proprietarul postarii: id-ul de pe server sau e-mail-ul (sesiune locala)
+    var ownerKey by rememberSaveable { mutableStateOf("") }
     val postUiState=postViewModel.uiState
     var photoUri by remember { mutableStateOf<Uri?>(null) }
     var photoPath by rememberSaveable { mutableStateOf("") }
@@ -109,6 +114,7 @@ fun PostAddScreen(onClose: () -> Unit) {
     LaunchedEffect(Unit) {
         scope.launch {
             user = userPreferencesRepository.getUser()?:User("","",0)
+            ownerKey = userPreferencesRepository.userPreferencesStream.first().ownerKey
         }
     }
     val selectImageLauncher = rememberLauncherForActivityResult(
@@ -206,6 +212,22 @@ fun PostAddScreen(onClose: () -> Unit) {
 
             } ?: Location()
 
+            // Publica / privata (doar pentru utilizatorii cu cont; vizitatorii nu au sectiune privata)
+            if (ownerKey.isNotEmpty()) Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Postare privată")
+                    Text(
+                        if (isPrivate) "Vizibilă doar ție, în secțiunea privată"
+                        else "Vizibilă tuturor în lista de postări",
+                        color = Color.Gray
+                    )
+                }
+                Switch(checked = isPrivate, onCheckedChange = { isPrivate = it })
+            }
+
             // Save Button
             Button(onClick = {
                 saving = true
@@ -214,27 +236,32 @@ fun PostAddScreen(onClose: () -> Unit) {
                     scope.launch {
                         Log.d("PostAdd", "Location to save: $locationToSave")
                         val base64Image = convertImageToBase64(context.contentResolver, uri)
-                        if (base64Image != null) {
-                            postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)
-                            Log.d("PostAdd", "Saving post with photo=$base64Image, description=$description, location=$selectedLocation")
-
-                        } else {
+                        if (base64Image == null) {
                             savingError = "Eroare la conversia imaginii"
+                        } else if (isPrivate && ownerKey.isNotEmpty()) {
+                            // doar local, legata de proprietar; nu trece prin server
+                            postViewModel.savePrivatePost(base64Image, description, ownerKey, locationToSave)
+                        } else {
+                            postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)
+                            Log.d("PostAdd", "Saving post with description=$description, location=$selectedLocation")
                         }
                         saving = false
                     }
                 }
-                showSimpleNotification(
-                    context,
-                    channelId,
-                    notificationId,
-                    "Post add",
-                    "${user.id} add a post"
-                )
-                notificationId += 1
+                if (!(isPrivate && ownerKey.isNotEmpty())) {
+                    showSimpleNotification(
+                        context,
+                        channelId,
+                        notificationId,
+                        "Post add",
+                        "${user.id} add a post"
+                    )
+                    notificationId += 1
+                }
             }) {
                 Text("Save Post")
             }
+            savingError?.let { Text(it, color = Color.Red) }
 
             // Loading Indicator
             if (postUiState.loadResult is Result.Loading) {
@@ -253,7 +280,7 @@ fun PostAddScreen(onClose: () -> Unit) {
 }
 
 // Functia de conversie a imaginii in base64
- fun convertImageToBase64(contentResolver: ContentResolver, imageUri: Uri): String? {
+fun convertImageToBase64(contentResolver: ContentResolver, imageUri: Uri): String? {
     return try {
         val inputStream: InputStream? = contentResolver.openInputStream(imageUri)
         val bytes = inputStream?.readBytes()

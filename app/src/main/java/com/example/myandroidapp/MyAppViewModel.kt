@@ -1,5 +1,6 @@
 package com.example.myandroidapp
 
+import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -59,6 +60,22 @@ class MyAppViewModel(
         unlocked.value = true
     }
 
+    // Momentul in care aplicatia a trecut in fundal (Home / alta aplicatie)
+    private var backgroundedAt: Long? = null
+
+    fun onAppBackground() {
+        backgroundedAt = SystemClock.elapsedRealtime()
+    }
+
+    /** La revenirea din fundal, daca a stat destul de mult acolo, sesiunea se blocheaza din nou. */
+    fun onAppForeground() {
+        val since = backgroundedAt ?: return
+        backgroundedAt = null
+        if (SystemClock.elapsedRealtime() - since >= LOCK_AFTER_MS) {
+            unlocked.value = false
+        }
+    }
+
     /** Sterge complet sesiunea si token-ul, apoi apeleaza onLoggedOut (navigare la login). */
     fun logout(onLoggedOut: () -> Unit) {
         viewModelScope.launch {
@@ -80,6 +97,9 @@ class MyAppViewModel(
     }
 
     companion object {
+        // cat timp poate sta aplicatia in fundal fara sa ceara din nou amprenta
+        const val LOCK_AFTER_MS = 30_000L
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app =

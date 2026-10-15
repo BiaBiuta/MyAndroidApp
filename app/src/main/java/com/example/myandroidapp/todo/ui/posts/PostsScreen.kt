@@ -40,7 +40,8 @@ import kotlinx.coroutines.launch
 fun PostsScreen(
     onItemClick: (id: String?) -> Unit,
     onAddItem: () -> Unit,
-    onLogout: () -> Unit
+    onLogout: () -> Unit,
+    onOpenPrivate: () -> Unit = {}
 ) {
     Log.d("PostsScreen", "recompose")
 
@@ -73,6 +74,9 @@ fun PostsScreen(
                         style = MaterialTheme.typography.body1,
                         color = if (myNetworkStatusViewModel.uiState) Purple80 else MaterialTheme.colors.error
                     )
+                    // Sectiunea privata (cere din nou amprenta sau e-mail + parola)
+                    Button(onClick = onOpenPrivate) { Text("Privat") }
+                    Spacer(modifier = Modifier.width(4.dp))
                     Button(onClick = onLogout) { Text("Logout") }
                 }
             )

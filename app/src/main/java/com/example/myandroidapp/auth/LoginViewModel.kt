@@ -7,14 +7,17 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.remote.User
+import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class LoginUiState(
     val isLoginMode: Boolean = true,
@@ -29,7 +32,9 @@ data class LoginUiState(
     val generalErrorMessage: String? = null,
     val isSuccess: Boolean = false,
     // dialogul "Activează autentificarea biometrică" de dupa login
-    val showBiometricOnboardingPrompt: Boolean = false
+    val showBiometricOnboardingPrompt: Boolean = false,
+    // telefonul are senzor, dar nicio amprenta inregistrata -> trimitem utilizatorul sa o adauge
+    val biometricNeedsEnrollment: Boolean = false
 )
 
 class LoginViewModel(application: Application) : AndroidViewModel(application) {
@@ -45,10 +50,17 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val _uiState = MutableStateFlow(LoginUiState())
     val uiState: StateFlow<LoginUiState> = _uiState.asStateFlow()
 
-    private fun biometricAvailable(): Boolean =
+    private fun biometricStatus(): Int =
         BiometricManager.from(getApplication())
-            .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
-                BiometricManager.BIOMETRIC_SUCCESS
+            .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
+
+    private fun biometricAvailable(): Boolean =
+        biometricStatus() == BiometricManager.BIOMETRIC_SUCCESS
+
+    /** Are senzor (cu sau fara amprenta inregistrata) */
+    private fun biometricHardwarePresent(): Boolean =
+        biometricStatus() == BiometricManager.BIOMETRIC_SUCCESS ||
+                biometricStatus() == BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED
 
     fun toggleAuthMode() {
         _uiState.update {
@@ -154,18 +166,24 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             val tokenHolder = result.getOrNull()
             val error = result.exceptionOrNull()
 
+            // Hash-ul parolei: permite verificarea parolei la intrarea in sectiunea privata,
+            // chiar si fara server. Parola in clar nu se salveaza.
+            val passwordHash = withContext(Dispatchers.Default) { PasswordHasher.hash(state.password) }
+
             val session: UserPreferences? = when {
                 // Serverul a raspuns cu token -> sesiune reala
                 tokenHolder != null -> UserPreferences(
                     email = state.email,
                     token = tokenHolder.token,
-                    user = tokenHolder.user
+                    user = tokenHolder.user,
+                    passwordHash = passwordHash
                 )
                 // Serverul nu poate fi contactat (oprit / alt IP) -> sesiune locala demo
                 error is java.io.IOException && !state.email.contains("error") -> UserPreferences(
                     email = state.email,
                     token = "local-" + java.util.UUID.randomUUID().toString(),
-                    user = User(state.email, "", 0)
+                    user = User(state.email, "", 0),
+                    passwordHash = passwordHash
                 )
                 // Serverul a raspuns, dar a respins datele (ex. 401) -> login esuat
                 else -> null
@@ -184,10 +202,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             }
             _uiState.update { it.copy(isAuthenticating = false) }
 
-            if (biometricAvailable()) {
+            if (biometricHardwarePresent()) {
                 // Prima conectare -> intrebam daca activeaza amprenta
                 pendingSession = session
-                _uiState.update { it.copy(showBiometricOnboardingPrompt = true) }
+                _uiState.update {
+                    it.copy(
+                        showBiometricOnboardingPrompt = true,
+                        biometricNeedsEnrollment = !biometricAvailable()
+                    )
+                }
             } else {
                 onSessionUnlocked()
                 userPreferencesRepository.save(session)
@@ -196,7 +219,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     // Google / Apple / anonim sunt demo si nu au token, deci nu creeaza o sesiune salvata:
-    // nu pot fi deblocate ulterior cu amprenta.
+    // nu pot fi deblocate ulterior cu amprenta si nu au sectiune privata.
     fun signInWithProvider(provider: String, onEnterWithoutSession: () -> Unit) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
@@ -224,8 +247,26 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         onSessionUnlocked()
         viewModelScope.launch {
             userPreferencesRepository.save(
-                UserPreferences(session.email, session.token, session.user, biometricEnabled = enable)
+                UserPreferences(
+                    email = session.email,
+                    token = session.token,
+                    user = session.user,
+                    biometricEnabled = enable,
+                    passwordHash = session.passwordHash
+                )
             )
+        }
+    }
+
+    /** Apelat cand utilizatorul revine din ecranul de sistem pentru adaugarea amprentei. */
+    fun onEnrollmentFinished(onSessionUnlocked: () -> Unit) {
+        if (biometricAvailable()) {
+            // a adaugat amprenta -> activam direct
+            _uiState.update { it.copy(biometricNeedsEnrollment = false) }
+            setBiometricsEnabled(true, onSessionUnlocked)
+        } else {
+            // nu a adaugat nimic -> dialogul ramane, poate incerca din nou sau alege "Nu acum"
+            _uiState.update { it.copy(biometricNeedsEnrollment = true) }
         }
     }
 }

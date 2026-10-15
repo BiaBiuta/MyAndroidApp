@@ -22,6 +22,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val email = stringPreferencesKey("email")
         val token = stringPreferencesKey("token")
         val biometricEnabled = booleanPreferencesKey("biometric_enabled")
+        val passwordHash = stringPreferencesKey("password_hash")
     }
 
     init {
@@ -48,6 +49,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             preferences[PreferencesKeys.token] = userPreferences.token
             preferences[PreferencesKeys.userKey] = userJson
             preferences[PreferencesKeys.biometricEnabled] = userPreferences.biometricEnabled
+            preferences[PreferencesKeys.passwordHash] = userPreferences.passwordHash
         }
     }
 
@@ -79,6 +81,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val email = preferences[PreferencesKeys.email] ?: ""
         val token = preferences[PreferencesKeys.token] ?: ""
         val biometricEnabled = preferences[PreferencesKeys.biometricEnabled] ?: false
+        val passwordHash = preferences[PreferencesKeys.passwordHash] ?: ""
 
         val user = if (userJson.isNotEmpty()) {
             Gson().fromJson(userJson, User::class.java)  // Deserializare JSON în User
@@ -90,7 +93,8 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             email = email,
             token = token,
             user = user,
-            biometricEnabled = biometricEnabled
+            biometricEnabled = biometricEnabled,
+            passwordHash = passwordHash
         )
     }
 }
