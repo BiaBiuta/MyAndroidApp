@@ -11,6 +11,11 @@ import com.example.myandroidapp.todo.data.remote.PostWsClient
 import com.example.myapp.todo.data.local.ItemDao
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
@@ -74,10 +79,11 @@ class PostRepository(
         try {
 
             posts = postService.find(authorization = getBearerToken())
-            // inlocuim doar postarile publice; cele private (locale) raman
-            itemDao.deleteAllPublic()
+            // inlocuim doar postarile publice deja sincronizate; cele private si cele
+            // create offline (inca netrimise) raman
+            itemDao.deleteAllPublicSynced()
             Log.d(TAG, "refresh succeeded")
-            posts.forEach{itemDao.insert(it.copy(isPrivate = false))}
+            itemDao.insert(posts.map { it.copy(isPrivate = false, isNotSaved = false) })
 //            postsFlow.emit(Result.Success(posts))
         } catch (e: Exception) {
             Log.w(TAG, "refresh failed", e)
@@ -86,41 +92,72 @@ class PostRepository(
     }
 
 
+    // Fiecare apel openWsClient primeste o "generatie". closeWsClient o creste, deci
+    // bucla de reconectare veche se opreste si nu ramane socket deschis in fundal.
+    @Volatile
+    private var wsGeneration = 0
+
+    /**
+     * Tine socket-ul deschis cat timp aplicatia e in prim-plan (apelat din onResume).
+     * Daca serverul nu raspunde sau conexiunea cade, reincearca automat (2s, 4s, ... max 30s).
+     * La fiecare (re)conectare face si un refresh, ca sa prinda postarile aparute intre timp.
+     */
     suspend fun openWsClient() {
-        Log.d(TAG, "openWsClient")
+        val generation = ++wsGeneration
+        Log.d(TAG, "openWsClient #$generation")
         withContext(Dispatchers.IO) {
-            getPostEvents().collect {
-                Log.d(TAG, "Item event collected $it")
-                if (it is Result.Success) {
-                    val itemEvent = it.data;
-                    when (itemEvent.event) {
-                        "created" -> handleItemCreated(itemEvent.payload.item)
-                        "updated" -> handleItemUpdated(itemEvent.payload.item)
-                        "deleted" -> handleItemDeleted(itemEvent.payload.item)
+            var backoffMs = 2_000L
+            while (isActive && generation == wsGeneration) {
+                var opened = false
+                getPostEvents(onOpen = { opened = true }).collect {
+                    Log.d(TAG, "Item event collected $it")
+                    if (it is Result.Success) {
+                        val itemEvent = it.data
+                        when (itemEvent.event) {
+                            "created" -> handleItemCreated(itemEvent.payload.item)
+                            "updated" -> handleItemUpdated(itemEvent.payload.item)
+                            "deleted" -> handleItemDeleted(itemEvent.payload.item)
+                        }
                     }
                 }
+                // socket-ul s-a inchis sau nu s-a putut conecta
+                if (generation != wsGeneration) break
+                if (opened) backoffMs = 2_000L
+                Log.d(TAG, "WebSocket inchis, reconectare in ${backoffMs}ms")
+                delay(backoffMs)
+                backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
             }
         }
     }
+
     suspend fun closeWsClient() {
         Log.d(TAG, "closeWsClient")
+        wsGeneration++
         withContext(Dispatchers.IO) {
             postWsClient.closeSocket()
         }
     }
-    suspend fun getPostEvents(): Flow<Result<PostEvent>> = callbackFlow {
+
+    fun getPostEvents(onOpen: () -> Unit = {}): Flow<Result<PostEvent>> = callbackFlow {
         Log.d(TAG, "getItemEvents started")
-        postWsClient.openSocket(
+        val socket = postWsClient.openSocket(
+            onOpen = {
+                onOpen()
+                // trimitem ce s-a salvat offline, apoi luam ce s-a postat cat timp nu eram conectati
+                launch {
+                    syncUnsynced()
+                    refresh()
+                }
+            },
             onEvent = {
-                Log.d(TAG, "onEvent $it")
                 if (it != null) {
-                    Log.d(TAG, "onEvent trySend $it")
+                    Log.d(TAG, "onEvent ${it.event} ${it.payload.item.id}")
                     trySend(Result.Success(it))
                 }
             },
             onClosed = { close() },
-            onFailure = { close() });
-        awaitClose { postWsClient.closeSocket() }
+            onFailure = { close() })
+        awaitClose { postWsClient.closeSocket(socket) }
     }
     suspend fun update(item: Post): Post {
         Log.d(TAG, "update $item...")
@@ -144,29 +181,52 @@ class PostRepository(
         )
         val eventJson = jsonAdapter.toJson(postEvent)
 
-        // Trimite mesajul JSON prin WebSocket
+        // Anuntam si prin WebSocket (daca e conectat). Daca nu e, postarea e deja in
+        // baza locala, deci apare oricum in lista.
         try {
-
-            postWsClient.webSocket.send(eventJson)
-            Log.d(TAG, "WebSocket event sent: $eventJson")
+            val sent = postWsClient.send(eventJson)
+            Log.d(TAG, "WebSocket event created sent=$sent")
         } catch (e: Exception) {
             Log.w(TAG, "Failed to send WebSocket event", e)
         }
-        // Trimite evenimentul către WebSocket
-        Log.d(TAG, "WebSocket event sent for $item")
         return createdItem
     }
 
     private suspend fun handleItemDeleted(item: Post) {
-        Log.d(TAG, "handleItemDeleted - todo $item")
+        Log.d(TAG, "handleItemDeleted ${item.id}")
+        itemDao.deleteById(item.id)
     }
 
     private suspend fun handleItemUpdated(post: Post) {
-        Log.d(TAG, "handleItemUpdated...")
-        //postDao.update(item)
-        posts = posts.map { if (it.id == post.id) post else it }
+        Log.d(TAG, "handleItemUpdated ${post.id}")
+        // scriem in baza locala -> lista (Flow din Room) se actualizeaza singura
+        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false))
+    }
 
+    /** Dupa ce o postare creata offline a ajuns pe server, stergem copia locala temporara. */
+    suspend fun deleteLocal(id: String) {
+        itemDao.deleteById(id)
+    }
 
+    // Un singur sync odata (SyncWorker si reconectarea WebSocket pot porni simultan)
+    private val syncMutex = Mutex()
+
+    /**
+     * Trimite pe server postarile publice create offline. Serverul le da id-ul lui,
+     * iar copia locala temporara ("local-...") se sterge, ca sa nu apara de doua ori.
+     */
+    suspend fun syncUnsynced() = syncMutex.withLock {
+        val unsynced = itemDao.getUnsyncedItems()
+        Log.d(TAG, "syncUnsynced: ${unsynced.size}")
+        for (local in unsynced) {
+            try {
+                save(local.copy(id = "", isNotSaved = false))
+                itemDao.deleteById(local.id)
+            } catch (e: Exception) {
+                Log.w(TAG, "syncUnsynced failed, reincercam mai tarziu", e)
+                return@withLock
+            }
+        }
     }
     suspend fun getUnsyncedItems(): List<Post> {
         return itemDao.getUnsyncedItems()
@@ -183,10 +243,18 @@ class PostRepository(
 //        //Log.d(posts.toString(),"posts")
 //        postsFlow.emit(Result.Success(posts))
         // ce vine de pe server / WebSocket e mereu public
-        itemDao.insert(post.copy(isPrivate = false))
+        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false))
     }
+
+    /** Postare publica salvata offline: apare imediat in lista, se trimite cand revine reteaua. */
     suspend fun saveToLocal(post: Post) {
-        itemDao.insert(post) // `postDao` reprezintă DAO-ul pentru entitatea `Post`
+        itemDao.insert(
+            post.copy(
+                id = post.id.ifEmpty { "local-" + java.util.UUID.randomUUID().toString() },
+                isNotSaved = true,
+                isPrivate = false
+            )
+        )
     }
 
 

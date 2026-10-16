@@ -33,6 +33,14 @@ interface ItemDao {
     @Query("DELETE FROM Posts WHERE isPrivate = 0")
     suspend fun deleteAllPublic(): Unit
 
+    // La refresh: inlocuim postarile publice venite de pe server, dar NU pe cele
+    // create pe telefon si inca netrimise (isNotSaved = 1), ca sa nu se piarda.
+    @Query("DELETE FROM Posts WHERE isPrivate = 0 AND isNotSaved = 0")
+    suspend fun deleteAllPublicSynced(): Unit
+
+    @Query("DELETE FROM Posts WHERE id = :id")
+    suspend fun deleteById(id: String): Unit
+
     // Postarile private nu se trimit niciodata pe server
     @Query("SELECT * FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0")
     suspend fun getUnsyncedItems(): List<Post>

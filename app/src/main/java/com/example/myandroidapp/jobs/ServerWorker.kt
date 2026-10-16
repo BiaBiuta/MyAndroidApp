@@ -63,12 +63,24 @@ class ServerWorker(
                 }
                 Result.success()
             } catch (e: Exception) {
+                // Serverul nu raspunde (oprit / IP gresit): pastram postarea local, ca sa apara
+                // imediat in lista; se trimite automat la reconectare (syncUnsynced).
                 e.printStackTrace()
-                Result.retry() // Reîncearcă dacă apare o eroare
+                if (isSaving) {
+                    try {
+                        itemRepository.saveToLocal(item.copy(isNotSaved = true))
+                        Result.success()
+                    } catch (e2: Exception) {
+                        e2.printStackTrace()
+                        Result.failure()
+                    }
+                } else {
+                    Result.retry()
+                }
             }
         } else {
             // Salvează datele local
-                item = item.copy(isNotSaved = true)
+            item = item.copy(isNotSaved = true)
             try {
                 itemRepository.saveToLocal(item) // Asigură-te că `saveToLocal` este implementat în DAO
                 Result.success()
