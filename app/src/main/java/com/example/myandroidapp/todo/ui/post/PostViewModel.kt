@@ -123,6 +123,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                     .putString("id",item.id)
                     .putString("photoPath", photoPath)
                     .putString("user_id",item.user_id)
+                    .putString("user_first_name",item.user_first_name)
                     .putBoolean("isNotSaved",item.isNotSaved)
                     .putString("description",item.description)
                     .putDouble("latitudine",item.location.latitude)

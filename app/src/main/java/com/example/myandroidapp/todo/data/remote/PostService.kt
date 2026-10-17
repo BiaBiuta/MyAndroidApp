@@ -3,6 +3,7 @@ package com.example.myandroidapp.todo.data.remote
 import com.example.myandroidapp.todo.data.Post
 import okhttp3.ResponseBody
 import retrofit2.http.Body
+import retrofit2.http.DELETE
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.Headers
@@ -18,6 +19,13 @@ interface PostService {
         @Header("Authorization") authorization: String,
         @Path("id") itemId: String?
     ): Post;
+    // Folosit la stergere (autor / admin). Daca serverul nu are ruta sau nu raspunde,
+    // postarea ramane ascunsa local (hidden_posts).
+    @DELETE("/post/{id}")
+    suspend fun delete(
+        @Header("Authorization") authorization: String,
+        @Path("id") itemId: String
+    ): retrofit2.Response<Unit>
     @Headers("Content-Type: application/json")
     @POST("/post")
     suspend fun create(@Header("Authorization") authorization: String, @Body item: Post): Post

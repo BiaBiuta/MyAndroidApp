@@ -2,6 +2,11 @@ package com.example.myandroidapp
 
 import android.os.Build
 import android.util.Log
+import android.widget.Toast
+import androidx.compose.ui.platform.LocalContext
+import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.todo.ui.admin.AdminScreen
+import com.example.myandroidapp.todo.ui.myposts.MyPostsScreen
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -27,6 +32,8 @@ import com.example.myapplication.todo.ui.items.PostsScreen
 val postsRoute = "posts"
 val authRoute = "auth"
 val privateRoute = "private"
+val myPostsRoute = "my-posts"
+val adminRoute = "admin"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -40,6 +47,8 @@ fun MyAppNavHost() {
     // myAppViewModel gestioneaza sesiunea: blocare/deblocare cu amprenta, logout, token
     val myAppViewModel = viewModel<MyAppViewModel>(factory = MyAppViewModel.Factory)
     val sessionState by myAppViewModel.sessionState.collectAsStateWithLifecycle()
+    // Contul logat (din baza de date locala) -> rolul decide ce ecrane sunt disponibile
+    val currentUser by myAppViewModel.currentUser.collectAsStateWithLifecycle()
 
     // Urmarim cand aplicatia trece in fundal / revine (ex. butonul Home)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -81,7 +90,21 @@ fun MyAppNavHost() {
                 onOpenPrivate = {
                     Log.d("MyAppNavHost", "navigate to private section")
                     navController.navigate(privateRoute)
-                })
+                },
+                onOpenMyPosts = { navController.navigate(myPostsRoute) },
+                onOpenAdmin = { navController.navigate(adminRoute) })
+        }
+        // Doar rolul USER
+        composable(route = myPostsRoute) {
+            MyPostsScreen(onBack = { navController.popBackStack() })
+        }
+        // Doar rolul ADMIN (actiunile sunt verificate si in RoleRepository)
+        composable(route = adminRoute) {
+            if (currentUser?.isAdmin == true) {
+                AdminScreen(onBack = { navController.popBackStack() })
+            } else {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            }
         }
         composable(route = "$postsRoute-new")
         {
@@ -143,6 +166,19 @@ fun MyAppNavHost() {
                 }
             }
             else -> {}
+        }
+    }
+
+    // Cont blocat de un admin -> mesaj + inapoi la login
+    val notice by myAppViewModel.notice.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+    LaunchedEffect(notice) {
+        notice?.let {
+            Toast.makeText(context, it, Toast.LENGTH_LONG).show()
+            myAppViewModel.consumeNotice()
+            if (navController.currentDestination?.route != authRoute) {
+                navController.navigate(authRoute) { popUpTo(0) }
+            }
         }
     }
 }

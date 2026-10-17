@@ -12,8 +12,19 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface ItemDao {
     // Lista principala: DOAR postarile publice. Postarile private nu apar aici niciodata.
-    @Query("SELECT * FROM Posts WHERE isPrivate = 0 ORDER BY created_at DESC")
+    // Postarile sterse de autor / admin (hidden_posts) nu mai apar.
+    @Query(
+        "SELECT * FROM Posts WHERE isPrivate = 0 " +
+                "AND id NOT IN (SELECT postId FROM hidden_posts) ORDER BY created_at DESC"
+    )
     fun getAll(): Flow<List<Post>>
+
+    // "Postarile mele" (rol USER): postarile publice ale unui utilizator
+    @Query(
+        "SELECT * FROM Posts WHERE isPrivate = 0 AND user_id = :ownerKey " +
+                "AND id NOT IN (SELECT postId FROM hidden_posts) ORDER BY created_at DESC"
+    )
+    fun getPublicByOwner(ownerKey: String): Flow<List<Post>>
 
     // Sectiunea privata: doar postarile private ale proprietarului dat.
     @Query("SELECT * FROM Posts WHERE isPrivate = 1 AND user_id = :ownerKey ORDER BY created_at DESC")

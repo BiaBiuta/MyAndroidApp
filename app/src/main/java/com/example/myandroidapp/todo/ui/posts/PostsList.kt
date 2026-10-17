@@ -37,7 +37,13 @@ import com.example.myandroidapp.todo.data.Post
 typealias OnPostFn=(id:String)->Unit
 typealias OnLikeFn=(id:String)->Unit
 @Composable
-fun PostList(posts:List<Post>,onPostClick: (String)->Unit, modifier: Modifier){
+fun PostList(
+    posts: List<Post>,
+    onPostClick: (String) -> Unit,
+    modifier: Modifier,
+    // Butoanele afisate sub fiecare postare (depind de rol: sterge / raporteaza)
+    actions: @Composable (Post) -> Unit = {}
+){
     Log.d("PostList","recompose")
     LazyColumn(
         modifier = modifier
@@ -45,7 +51,7 @@ fun PostList(posts:List<Post>,onPostClick: (String)->Unit, modifier: Modifier){
             .padding(12.dp)
     ) {
         items(posts) { item ->
-            PostComponent  (item, onClick = {onPostClick(item.id)})
+            PostComponent(item, onClick = { onPostClick(item.id) }, actions = { actions(item) })
         }
     }
 }
@@ -53,6 +59,7 @@ fun PostList(posts:List<Post>,onPostClick: (String)->Unit, modifier: Modifier){
 fun PostComponent(
     dep: Post, // Modelul Post similar celui din React
     onClick: () -> Unit,
+    actions: @Composable () -> Unit = {},
 //    onLike: () -> Unit,
 //    onComment: () -> Unit,
 //    onShare: () -> Unit
@@ -153,6 +160,8 @@ fun PostComponent(
                     Text("Share")
                 }
             }
+            // Actiunile permise rolului curent (sterge / raporteaza)
+            actions()
         }
     }
 }

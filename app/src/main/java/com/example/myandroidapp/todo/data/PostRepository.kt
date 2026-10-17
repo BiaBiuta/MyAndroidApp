@@ -9,6 +9,10 @@ import com.example.myandroidapp.todo.data.remote.PostEvent
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
 import com.example.myapp.todo.data.local.ItemDao
+import com.example.myandroidapp.todo.data.local.HiddenPostEntity
+import com.example.myandroidapp.todo.data.local.ModerationDao
+import com.example.myandroidapp.todo.data.local.ReportEntity
+import com.example.myandroidapp.todo.data.local.ReportedPost
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -29,7 +33,8 @@ import kotlin.collections.List
 class PostRepository(
     private val postService: PostService,
     private val postWsClient: PostWsClient,
-    private val itemDao: ItemDao
+    private val itemDao: ItemDao,
+    private val moderationDao: ModerationDao
 ) {
     private var posts: kotlin.collections.List<Post> = kotlin.collections.listOf()
 
@@ -42,6 +47,42 @@ class PostRepository(
 
     // Doar postarile publice (lista principala)
     val itemStream by lazy { itemDao.getAll() }
+
+    // "Postarile mele": postarile publice ale unui utilizator
+    fun publicItemsOf(ownerKey: String): Flow<List<Post>> = itemDao.getPublicByOwner(ownerKey)
+
+    // ---------- Moderare (roluri) ----------
+
+    /** Utilizatorul raporteaza o postare (o singura raportare per utilizator). */
+    suspend fun reportPost(postId: String, reporterId: String, reason: String) {
+        moderationDao.insertReport(ReportEntity(postId, reporterId, reason))
+    }
+
+    fun reportedPosts(): Flow<List<ReportedPost>> = moderationDao.observeReportedPosts()
+
+    fun reportedBy(reporterId: String): Flow<List<String>> = moderationDao.observeReportedBy(reporterId)
+
+    /** Adminul respinge raportarile unei postari (postarea ramane). */
+    suspend fun dismissReports(postId: String) {
+        moderationDao.deleteReportsFor(postId)
+    }
+
+    /**
+     * Sterge o postare (autorul ei sau un admin). O ascundem local imediat, apoi
+     * incercam si pe server; daca serverul nu raspunde, ramane ascunsa pe acest telefon.
+     */
+    suspend fun deletePost(postId: String, actorId: String) {
+        moderationDao.hide(HiddenPostEntity(postId, actorId))
+        moderationDao.deleteReportsFor(postId)
+        itemDao.deleteById(postId)
+        if (postId.startsWith("local-") || postId.startsWith("private-")) return
+        try {
+            val response = postService.delete(authorization = getBearerToken(), itemId = postId)
+            Log.d(TAG, "server delete $postId -> ${response.code()}")
+        } catch (e: Exception) {
+            Log.w(TAG, "server delete failed, postarea ramane ascunsa local", e)
+        }
+    }
 
     // Doar postarile private ale proprietarului dat (sectiunea privata)
     fun privateItemStream(ownerKey: String): Flow<List<Post>> = itemDao.getPrivate(ownerKey)

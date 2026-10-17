@@ -15,6 +15,9 @@ import com.example.myandroidapp.todo.data.PostRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import com.example.myandroidapp.auth.data.RoleRepository
+import com.example.myandroidapp.auth.data.local.UserEntity
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -35,8 +38,21 @@ sealed interface SessionState {
 
 class MyAppViewModel(
     private val userPreferencesRepository: UserPreferencesRepository,
-    private val postRepository: PostRepository
+    private val postRepository: PostRepository,
+    private val roleRepository: RoleRepository
 ) : ViewModel() {
+
+    /** Contul logat, cu rolul lui (USER / ADMIN), din baza de date locala. Se actualizeaza live. */
+    val currentUser: StateFlow<UserEntity?> = roleRepository.currentUser
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    // Mesaj afisat utilizatorului (ex. cont blocat de admin)
+    private val _notice = MutableStateFlow<String?>(null)
+    val notice: StateFlow<String?> = _notice.asStateFlow()
+
+    fun consumeNotice() {
+        _notice.value = null
+    }
 
     // Traieste cat traieste Activity-ul: la inchiderea si redeschiderea aplicatiei
     // ViewModel-ul e nou -> unlocked = false -> se cere din nou amprenta.
@@ -53,6 +69,25 @@ class MyAppViewModel(
 
     init {
         Log.d(TAG, "init")
+        viewModelScope.launch {
+            // Dupa orice login reusit (indiferent de metoda), contul ajunge in baza locala cu rolul lui
+            userPreferencesRepository.userPreferencesStream.collect { prefs ->
+                try {
+                    roleRepository.registerSession(prefs)
+                } catch (e: Exception) {
+                    Log.w(TAG, "registerSession failed", e)
+                }
+            }
+        }
+        viewModelScope.launch {
+            // Daca un admin blocheaza contul in timp ce e folosit -> deconectare imediata
+            currentUser.collect { user ->
+                if (user?.isBlocked == true) {
+                    _notice.value = RoleRepository.BLOCKED_MESSAGE
+                    logout {}
+                }
+            }
+        }
     }
 
     /** Apelat dupa login cu e-mail/parola sau dupa amprenta acceptata. */
@@ -106,7 +141,8 @@ class MyAppViewModel(
                     (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
                 MyAppViewModel(
                     app.container.userPreferencesRepository,
-                    app.container.postRepository
+                    app.container.postRepository,
+                    app.container.roleRepository
                 )
             }
         }

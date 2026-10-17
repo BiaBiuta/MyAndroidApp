@@ -242,7 +242,9 @@ fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
                             // doar local, legata de proprietar; nu trece prin server
                             postViewModel.savePrivatePost(base64Image, description, ownerKey, locationToSave)
                         } else {
-                            postViewModel.saveOrUpdateItem(base64Image, description, user.id.toString(), "","", "", locationToSave)
+                            // user_id = ownerKey (id-ul de pe server sau e-mailul pentru sesiunile locale),
+                            // ca "Postările mele" si stergerea postarilor proprii sa functioneze pentru orice cont
+                            postViewModel.saveOrUpdateItem(base64Image, description, ownerKey.ifEmpty { user.id.toString() }, "","", user.email.substringBefore("@"), locationToSave)
                             Log.d("PostAdd", "Saving post with description=$description, location=$selectedLocation")
                         }
                         saving = false

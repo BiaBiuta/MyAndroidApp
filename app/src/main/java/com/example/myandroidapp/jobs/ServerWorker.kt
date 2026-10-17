@@ -43,7 +43,7 @@ class ServerWorker(
             user_id = user_id,
             user_profile_photo = "",
             user_last_name = "",
-            user_first_name = "",
+            user_first_name = workerParams.inputData.getString("user_first_name").orEmpty(),
             professional = false,
             created_at = "",
             updated_at = "",

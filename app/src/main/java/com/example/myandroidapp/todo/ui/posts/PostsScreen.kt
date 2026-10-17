@@ -10,18 +10,28 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.AlertDialog
 import androidx.compose.material.MaterialTheme
 import androidx.compose.material.Surface
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Person
+import com.example.myandroidapp.auth.data.local.UserEntity
+import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.todo.data.Post
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myandroidapp.R
@@ -41,7 +51,11 @@ fun PostsScreen(
     onItemClick: (id: String?) -> Unit,
     onAddItem: () -> Unit,
     onLogout: () -> Unit,
-    onOpenPrivate: () -> Unit = {}
+    onOpenPrivate: () -> Unit = {},
+    // doar USER: postarile proprii
+    onOpenMyPosts: () -> Unit = {},
+    // doar ADMIN: moderare + gestionare utilizatori
+    onOpenAdmin: () -> Unit = {}
 ) {
     Log.d("PostsScreen", "recompose")
 
@@ -55,6 +69,19 @@ fun PostsScreen(
     var selectedLocation by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val itemsUiState by itemsViewModel.uiState.collectAsStateWithLifecycle(initialValue = listOf())
+    val currentUser by itemsViewModel.currentUser.collectAsStateWithLifecycle()
+    val reportedByMe by itemsViewModel.reportedByMe.collectAsStateWithLifecycle()
+    var postToReport by remember { mutableStateOf<Post?>(null) }
+    var postToDelete by remember { mutableStateOf<Post?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    // Confirmari / erori ale actiunilor pe rol (stergere, raportare)
+    LaunchedEffect(itemsViewModel.message) {
+        itemsViewModel.message?.let {
+            snackbarHostState.showSnackbar(it)
+            itemsViewModel.consumeMessage()
+        }
+    }
 
     LaunchedEffect(isEditing) {
         if (isEditing) {
@@ -81,6 +108,7 @@ fun PostsScreen(
                 }
             )
         },
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             MyFloatingActionButton(
                 isEditing = isEditing,
@@ -92,14 +120,20 @@ fun PostsScreen(
             )
         }
     ) { paddingValues ->
-        LazyColumn(
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 32.dp),
-            modifier = Modifier.padding(paddingValues)
+        Column(
+            modifier = Modifier
+                .padding(paddingValues)
+                .fillMaxSize()
         ) {
-            item { Text("Todo", style = MaterialTheme.typography.h6) }
-        }
-
-        Column(modifier = Modifier.fillMaxSize()) {
+            // Banda cu rolul curent + functionalitatea unica a rolului
+            RoleBar(
+                user = currentUser,
+                onOpenMyPosts = onOpenMyPosts,
+                onOpenAdmin = onOpenAdmin
+            )
+            if (itemsViewModel.isRefreshing) {
+                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            }
             PostList(
                 posts = itemsUiState,
                 onPostClick = { postId ->
@@ -114,9 +148,51 @@ fun PostsScreen(
                         }
                     }
                 },
-                modifier = Modifier.padding(paddingValues)
+                modifier = Modifier.fillMaxSize(),
+                actions = { post ->
+                    PostRoleActions(
+                        canDelete = itemsViewModel.canDelete(post, currentUser),
+                        canReport = itemsViewModel.canReport(post, currentUser),
+                        alreadyReported = post.id in reportedByMe,
+                        onDelete = { postToDelete = post },
+                        onReport = { postToReport = post }
+                    )
+                }
             )
         }
+    }
+
+    postToDelete?.let { post ->
+        AlertDialog(
+            onDismissRequest = { postToDelete = null },
+            title = { Text("Ștergeți postarea?") },
+            text = {
+                Text(
+                    if (currentUser?.isAdmin == true && post.user_id != currentUser?.ownerKey)
+                        "Postarea va fi eliminată pentru toți utilizatorii (moderare)."
+                    else "Postarea va fi ștearsă definitiv."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    itemsViewModel.deletePost(post)
+                    postToDelete = null
+                }) { Text("Șterge") }
+            },
+            dismissButton = {
+                TextButton(onClick = { postToDelete = null }) { Text("Anulează") }
+            }
+        )
+    }
+
+    postToReport?.let { post ->
+        ReportPostDialog(
+            onDismiss = { postToReport = null },
+            onConfirm = { reason ->
+                itemsViewModel.reportPost(post, reason)
+                postToReport = null
+            }
+        )
     }
 
     if (showMapDialog) {
@@ -185,4 +261,116 @@ private fun EditMessage(shown: Boolean) {
 @Composable
 fun PreviewPostsScreen() {
     PostsScreen(onItemClick = {}, onAddItem = {}, onLogout = {})
+}
+
+
+/** Banda de sub bara de sus: rolul curent si butonul catre functionalitatea unica a rolului. */
+@Composable
+fun RoleBar(user: UserEntity?, onOpenMyPosts: () -> Unit, onOpenAdmin: () -> Unit) {
+    Surface(
+        color = if (user?.isAdmin == true) Color(0xFFFFF3E0) else Color(0xFFE8EAF6),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = if (user?.isAdmin == true) Icons.Default.AdminPanelSettings else Icons.Default.Person,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = when {
+                    user == null -> "Vizitator (fără cont)"
+                    user.isAdmin -> "Administrator · ${user.email}"
+                    else -> "Utilizator · ${user.email}"
+                },
+                style = MaterialTheme.typography.body2,
+                modifier = Modifier.weight(1f)
+            )
+            when {
+                user == null -> {}
+                user.isAdmin -> TextButton(onClick = onOpenAdmin) { Text("Administrare") }
+                else -> TextButton(onClick = onOpenMyPosts) { Text("Postările mele") }
+            }
+        }
+    }
+}
+
+/**
+ * Butoanele de sub o postare, in functie de rol:
+ *  - ADMIN: Sterge (orice postare)
+ *  - USER: Sterge (doar postarile proprii) si Raporteaza (postarile altora)
+ */
+@Composable
+fun PostRoleActions(
+    canDelete: Boolean,
+    canReport: Boolean,
+    alreadyReported: Boolean,
+    onDelete: () -> Unit,
+    onReport: () -> Unit
+) {
+    if (!canDelete && !canReport) return
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.End
+    ) {
+        if (canReport) {
+            TextButton(onClick = onReport, enabled = !alreadyReported) {
+                Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (alreadyReported) "Raportat" else "Raportează")
+            }
+        }
+        if (canDelete) {
+            TextButton(onClick = onDelete) {
+                Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Șterge")
+            }
+        }
+    }
+}
+
+private val REPORT_REASONS = listOf(
+    "Conținut nepotrivit",
+    "Spam sau reclamă",
+    "Informații false",
+    "Încalcă drepturile cuiva"
+)
+
+@Composable
+fun ReportPostDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
+    var selected by remember { mutableStateOf(REPORT_REASONS.first()) }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Raportează postarea") },
+        text = {
+            Column {
+                Text("De ce raportați această postare? Un administrator o va verifica.")
+                Spacer(modifier = Modifier.height(8.dp))
+                REPORT_REASONS.forEach { reason ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .selectable(selected = selected == reason, onClick = { selected = reason })
+                            .padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RadioButton(selected = selected == reason, onClick = { selected = reason })
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(reason)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(selected) }) { Text("Trimite") }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("Anulează") }
+        }
+    )
 }

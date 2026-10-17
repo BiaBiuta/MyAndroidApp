@@ -4,6 +4,7 @@ import android.content.Context
 import android.util.Log
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.myandroidapp.auth.data.AuthRepository
+import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.remote.AuthDataSource
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.core.TAG
@@ -42,7 +43,7 @@ class AppContainer(val context: Context) {
     //initialization
     //*
     val postRepository: PostRepository by lazy {
-        PostRepository(postService, postWsClient,database.itemDao())
+        PostRepository(postService, postWsClient, database.itemDao(), database.moderationDao())
     }
 
     val authRepository: AuthRepository by lazy {
@@ -51,5 +52,10 @@ class AppContainer(val context: Context) {
 
     val userPreferencesRepository: UserPreferencesRepository by lazy {
         UserPreferencesRepository(context.userPreferencesDataStore)
+    }
+
+    // Rolurile (USER / ADMIN) ale conturilor, in baza de date locala
+    val roleRepository: RoleRepository by lazy {
+        RoleRepository(database.userDao(), userPreferencesRepository)
     }
 }
