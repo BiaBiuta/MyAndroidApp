@@ -9,6 +9,10 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.TAG
+import com.example.myandroidapp.core.security.SecureStore
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.withContext
 import com.google.gson.Gson
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.catch
@@ -39,17 +43,23 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             }
         }
         .map { preferences -> mapUserPreferences(preferences) }  // Mapează datele în UserPreferences
+        // decriptarea (Android Keystore) se face pe un fir de fundal, nu pe UI
+        .flowOn(Dispatchers.Default)
 
     // Salvează datele utilizatorului
     suspend fun save(userPreferences: UserPreferences) {
         Log.d(TAG, "Saving userPreferences...")
         val userJson = Gson().toJson(userPreferences.user)
+        // Datele sensibile (token-ul de sesiune si hash-ul parolei) se scriu doar CRIPTATE,
+        // cu o cheie AES tinuta in Android Keystore (SecureStore)
+        val encryptedToken = withContext(Dispatchers.Default) { SecureStore.encrypt(userPreferences.token) }
+        val encryptedHash = withContext(Dispatchers.Default) { SecureStore.encrypt(userPreferences.passwordHash) }
         dataStore.edit { preferences ->
             preferences[PreferencesKeys.email] = userPreferences.email
-            preferences[PreferencesKeys.token] = userPreferences.token
+            preferences[PreferencesKeys.token] = encryptedToken
             preferences[PreferencesKeys.userKey] = userJson
             preferences[PreferencesKeys.biometricEnabled] = userPreferences.biometricEnabled
-            preferences[PreferencesKeys.passwordHash] = userPreferences.passwordHash
+            preferences[PreferencesKeys.passwordHash] = encryptedHash
         }
     }
 
@@ -79,9 +89,10 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     private fun mapUserPreferences(preferences: Preferences): UserPreferences {
         val userJson = preferences[PreferencesKeys.userKey] ?: ""
         val email = preferences[PreferencesKeys.email] ?: ""
-        val token = preferences[PreferencesKeys.token] ?: ""
+        // decrypt intoarce valorile vechi, necriptate, neschimbate (sesiunile de dinainte raman valide)
+        val token = SecureStore.decrypt(preferences[PreferencesKeys.token] ?: "")
         val biometricEnabled = preferences[PreferencesKeys.biometricEnabled] ?: false
-        val passwordHash = preferences[PreferencesKeys.passwordHash] ?: ""
+        val passwordHash = SecureStore.decrypt(preferences[PreferencesKeys.passwordHash] ?: "")
 
         val user = if (userJson.isNotEmpty()) {
             Gson().fromJson(userJson, User::class.java)  // Deserializare JSON în User

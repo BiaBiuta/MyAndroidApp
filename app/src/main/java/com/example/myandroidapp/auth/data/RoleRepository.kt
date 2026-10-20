@@ -4,7 +4,10 @@ import android.util.Log
 import com.example.myandroidapp.auth.data.local.UserDao
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.UserRole
+import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.data.UserPreferences
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -16,7 +19,8 @@ import kotlinx.coroutines.flow.map
 import java.util.Locale
 
 /**
- * Rolurile utilizatorilor (USER / ADMIN), tinute in baza de date locala (tabela users).
+ * Conturile utilizatorilor, tinute in baza de date locala (tabela users):
+ * rolul (USER / ADMIN) si credentialele (hash-ul parolei, pentru login offline).
  * Nu schimba login-ul: dupa orice login reusit, contul sesiunii curente este
  * inregistrat aici (registerSession), iar rolul lui decide ce vede in aplicatie.
  */
@@ -60,6 +64,51 @@ class RoleRepository(
                 role = if (email in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER
             )
         userDao.upsert(user)
+    }
+
+    // ---------- Credentiale (login offline) ----------
+
+    /** Rezultatul verificarii offline a parolei, in baza de date locala. */
+    enum class OfflineCheck { VALID, WRONG_PASSWORD, UNKNOWN_ACCOUNT, BLOCKED }
+
+    /**
+     * Salveaza in baza locala hash-ul parolei pentru un login reusit (online sau primul login
+     * offline al unui cont nou), ca urmatoarele login-uri offline sa poata verifica parola.
+     */
+    suspend fun saveCredentials(email: String, ownerKey: String, passwordHash: String) {
+        val normalized = normalize(email)
+        val existing = userDao.findByEmail(normalized)
+        val user = existing?.copy(
+            ownerKey = ownerKey,
+            passwordHash = passwordHash,
+            lastLoginAt = System.currentTimeMillis()
+        ) ?: UserEntity(
+            email = normalized,
+            ownerKey = ownerKey,
+            displayName = normalized.substringBefore("@"),
+            role = if (normalized in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER,
+            passwordHash = passwordHash
+        )
+        userDao.upsert(user)
+    }
+
+    /** true daca un admin a blocat contul cu acest e-mail. */
+    suspend fun isBlocked(email: String): Boolean =
+        userDao.findByEmail(normalize(email))?.isBlocked == true
+
+    /**
+     * Verifica parola fara server, fata de hash-ul din baza locala:
+     *  - VALID: contul exista si parola e corecta
+     *  - WRONG_PASSWORD: contul exista, parola e gresita -> login refuzat
+     *  - UNKNOWN_ACCOUNT: contul nu a mai fost folosit pe acest telefon
+     *  - BLOCKED: contul a fost blocat de un admin
+     */
+    suspend fun checkOffline(email: String, password: String): OfflineCheck {
+        val user = userDao.findByEmail(normalize(email)) ?: return OfflineCheck.UNKNOWN_ACCOUNT
+        if (user.isBlocked) return OfflineCheck.BLOCKED
+        if (user.passwordHash.isEmpty()) return OfflineCheck.UNKNOWN_ACCOUNT
+        val ok = withContext(Dispatchers.Default) { PasswordHasher.verify(password, user.passwordHash) }
+        return if (ok) OfflineCheck.VALID else OfflineCheck.WRONG_PASSWORD
     }
 
     // ---------- Administrare (doar ADMIN) ----------

@@ -6,6 +6,7 @@ import androidx.biometric.BiometricManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myandroidapp.MyApplication
+import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.TAG
@@ -42,6 +43,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val container = (application as MyApplication).container
     private val authRepository = container.authRepository
     private val userPreferencesRepository = container.userPreferencesRepository
+    private val roleRepository = container.roleRepository
 
     // Sesiunea (token + user) primita la login. O salvam abia dupa ce utilizatorul
     // raspunde la dialogul de activare a amprentei, impreuna cu alegerea lui.
@@ -170,6 +172,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             // chiar si fara server. Parola in clar nu se salveaza.
             val passwordHash = withContext(Dispatchers.Default) { PasswordHasher.hash(state.password) }
 
+            // Cont blocat de un administrator -> nu intra, nici online, nici offline
+            if (roleRepository.isBlocked(state.email)) {
+                _uiState.update {
+                    it.copy(isAuthenticating = false, generalErrorMessage = RoleRepository.BLOCKED_MESSAGE)
+                }
+                return@launch
+            }
+
+            var failureMessage = "Date de autentificare incorecte. Verificați e-mailul sau parola."
             val session: UserPreferences? = when {
                 // Serverul a raspuns cu token -> sesiune reala
                 tokenHolder != null -> UserPreferences(
@@ -178,13 +189,28 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     user = tokenHolder.user,
                     passwordHash = passwordHash
                 )
-                // Serverul nu poate fi contactat (oprit / alt IP) -> sesiune locala demo
-                error is java.io.IOException && !state.email.contains("error") -> UserPreferences(
-                    email = state.email,
-                    token = "local-" + java.util.UUID.randomUUID().toString(),
-                    user = User(state.email, "", 0),
-                    passwordHash = passwordHash
-                )
+                // Serverul nu poate fi contactat (oprit / alt IP) -> parola se verifica
+                // in baza de date locala (hash-ul salvat la login-urile anterioare)
+                error is java.io.IOException && !state.email.contains("error") ->
+                    when (roleRepository.checkOffline(state.email, state.password)) {
+                        RoleRepository.OfflineCheck.VALID,
+                            // cont folosit prima data pe acest telefon: se creeaza local (ca inainte)
+                        RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT -> UserPreferences(
+                            email = state.email,
+                            token = "local-" + java.util.UUID.randomUUID().toString(),
+                            user = User(state.email, "", 0),
+                            passwordHash = passwordHash
+                        )
+                        RoleRepository.OfflineCheck.WRONG_PASSWORD -> {
+                            failureMessage = "Parola este incorectă. Serverul nu este disponibil, " +
+                                    "așa că parola a fost verificată în baza de date locală."
+                            null
+                        }
+                        RoleRepository.OfflineCheck.BLOCKED -> {
+                            failureMessage = RoleRepository.BLOCKED_MESSAGE
+                            null
+                        }
+                    }
                 // Serverul a raspuns, dar a respins datele (ex. 401) -> login esuat
                 else -> null
             }
@@ -195,10 +221,18 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     it.copy(
                         isAuthenticating = false,
                         authenticationError = error,
-                        generalErrorMessage = "Date de autentificare incorecte. Verificați e-mailul sau parola."
+                        generalErrorMessage = failureMessage
                     )
                 }
                 return@launch
+            }
+
+            // Credentialele (hash-ul parolei) ajung in baza de date locala, ca urmatorul
+            // login offline sa poata verifica parola
+            try {
+                roleRepository.saveCredentials(session.email, session.ownerKey, passwordHash)
+            } catch (e: Exception) {
+                Log.w(TAG, "saveCredentials failed", e)
             }
             _uiState.update { it.copy(isAuthenticating = false) }
 

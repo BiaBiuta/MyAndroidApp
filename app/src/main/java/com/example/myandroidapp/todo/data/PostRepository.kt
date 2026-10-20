@@ -9,6 +9,9 @@ import com.example.myandroidapp.todo.data.remote.PostEvent
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
 import com.example.myapp.todo.data.local.ItemDao
+import com.example.myandroidapp.core.security.SecureStore
+import kotlinx.coroutines.flow.flowOn
+import kotlinx.coroutines.flow.map
 import com.example.myandroidapp.todo.data.local.HiddenPostEntity
 import com.example.myandroidapp.todo.data.local.ModerationDao
 import com.example.myandroidapp.todo.data.local.ReportEntity
@@ -84,17 +87,36 @@ class PostRepository(
         }
     }
 
-    // Doar postarile private ale proprietarului dat (sectiunea privata)
+    /**
+     * Doar postarile private ale proprietarului dat (sectiunea privata).
+     * In baza de date descrierea si poza sunt CRIPTATE (Android Keystore); le decriptam aici,
+     * pe un fir de fundal. Postarile private vechi, necriptate, se citesc neschimbate.
+     */
     fun privateItemStream(ownerKey: String): Flow<List<Post>> = itemDao.getPrivate(ownerKey)
+        .map { posts ->
+            posts.map {
+                it.copy(
+                    description = SecureStore.decrypt(it.description),
+                    photo = SecureStore.decrypt(it.photo)
+                )
+            }
+        }
+        .flowOn(Dispatchers.Default)
 
-    /** Postare privata: se salveaza doar local, nu ajunge niciodata pe server. */
+    /** Postare privata: se salveaza doar local si CRIPTAT, nu ajunge niciodata pe server. */
     suspend fun savePrivate(post: Post): Post {
         val privatePost = post.copy(
             id = post.id.ifEmpty { "private-" + java.util.UUID.randomUUID().toString() },
             isPrivate = true,
             isNotSaved = false
         )
-        itemDao.insert(privatePost)
+        val encrypted = withContext(Dispatchers.Default) {
+            privatePost.copy(
+                description = SecureStore.encrypt(privatePost.description),
+                photo = SecureStore.encrypt(privatePost.photo)
+            )
+        }
+        itemDao.insert(encrypted)
         return privatePost
     }
 
