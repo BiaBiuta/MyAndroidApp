@@ -92,6 +92,26 @@ class RoleRepository(
         userDao.upsert(user)
     }
 
+    /** Rezultatul inregistrarii unui cont nou. */
+    enum class RegisterResult { CREATED, ALREADY_EXISTS, BLOCKED }
+
+    suspend fun findAccount(email: String): UserEntity? = userDao.findByEmail(normalize(email))
+
+    /**
+     * Inregistrare: creeaza contul in baza de date locala, cu hash-ul parolei.
+     * Un cont care a fost folosit in versiunea anterioara a aplicatiei (fara parola salvata)
+     * isi poate seta acum parola o singura data; un cont cu parola deja salvata e refuzat.
+     */
+    suspend fun registerAccount(email: String, passwordHash: String): RegisterResult {
+        val existing = userDao.findByEmail(normalize(email))
+        if (existing != null) {
+            if (existing.isBlocked) return RegisterResult.BLOCKED
+            if (existing.passwordHash.isNotEmpty()) return RegisterResult.ALREADY_EXISTS
+        }
+        saveCredentials(email, existing?.ownerKey ?: email, passwordHash)
+        return RegisterResult.CREATED
+    }
+
     /** true daca un admin a blocat contul cu acest e-mail. */
     suspend fun isBlocked(email: String): Boolean =
         userDao.findByEmail(normalize(email))?.isBlocked == true

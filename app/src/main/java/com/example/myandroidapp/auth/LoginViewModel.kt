@@ -119,7 +119,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     /**
      * @param onSessionUnlocked sesiunea e deblocata (login cu e-mail si parola reusit).
      *        Navigarea o face MyAppNavHost cand sesiunea salvata devine activa.
-     * @param onEnterWithoutSession intrare fara sesiune salvata (inregistrare demo).
+     * @param onEnterWithoutSession nefolosit aici (inregistrarea creeaza acum un cont real); pastrat pentru LoginScreen.
      */
     fun submitEmailAuth(onSessionUnlocked: () -> Unit, onEnterWithoutSession: () -> Unit) {
         val state = _uiState.value
@@ -156,83 +156,24 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         viewModelScope.launch {
             _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
 
-            if (!state.isLoginMode) {
-                // Serverul nu are endpoint de inregistrare: pastram comportamentul demo de dinainte.
-                delay(800)
-                _uiState.update { it.copy(isAuthenticating = false) }
-                onEnterWithoutSession()
-                return@launch
-            }
-
-            val result = authRepository.login(state.email, state.password)
-            val tokenHolder = result.getOrNull()
-            val error = result.exceptionOrNull()
-
-            // Hash-ul parolei: permite verificarea parolei la intrarea in sectiunea privata,
-            // chiar si fara server. Parola in clar nu se salveaza.
+            // Hash-ul parolei (PBKDF2 cu salt): se salveaza in baza de date locala.
+            // Parola in clar nu se salveaza niciodata.
             val passwordHash = withContext(Dispatchers.Default) { PasswordHasher.hash(state.password) }
 
-            // Cont blocat de un administrator -> nu intra, nici online, nici offline
-            if (roleRepository.isBlocked(state.email)) {
-                _uiState.update {
-                    it.copy(isAuthenticating = false, generalErrorMessage = RoleRepository.BLOCKED_MESSAGE)
-                }
-                return@launch
-            }
-
-            var failureMessage = "Date de autentificare incorecte. Verificați e-mailul sau parola."
-            val session: UserPreferences? = when {
-                // Serverul a raspuns cu token -> sesiune reala
-                tokenHolder != null -> UserPreferences(
-                    email = state.email,
-                    token = tokenHolder.token,
-                    user = tokenHolder.user,
-                    passwordHash = passwordHash
-                )
-                // Serverul nu poate fi contactat (oprit / alt IP) -> parola se verifica
-                // in baza de date locala (hash-ul salvat la login-urile anterioare)
-                error is java.io.IOException && !state.email.contains("error") ->
-                    when (roleRepository.checkOffline(state.email, state.password)) {
-                        RoleRepository.OfflineCheck.VALID,
-                            // cont folosit prima data pe acest telefon: se creeaza local (ca inainte)
-                        RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT -> UserPreferences(
-                            email = state.email,
-                            token = "local-" + java.util.UUID.randomUUID().toString(),
-                            user = User(state.email, "", 0),
-                            passwordHash = passwordHash
-                        )
-                        RoleRepository.OfflineCheck.WRONG_PASSWORD -> {
-                            failureMessage = "Parola este incorectă. Serverul nu este disponibil, " +
-                                    "așa că parola a fost verificată în baza de date locală."
-                            null
-                        }
-                        RoleRepository.OfflineCheck.BLOCKED -> {
-                            failureMessage = RoleRepository.BLOCKED_MESSAGE
-                            null
-                        }
-                    }
-                // Serverul a raspuns, dar a respins datele (ex. 401) -> login esuat
-                else -> null
+            // Autentificarea NU creeaza conturi; doar Inregistrarea creeaza.
+            val (session, failureMessage) = try {
+                if (state.isLoginMode) loginWithEmail(state.email, state.password, passwordHash)
+                else registerAccount(state.email, passwordHash)
+            } catch (e: Exception) {
+                Log.w(TAG, "auth failed", e)
+                null to "A apărut o eroare neașteptată. Încercați din nou."
             }
 
             if (session == null) {
-                Log.w(TAG, "login failed", error)
                 _uiState.update {
-                    it.copy(
-                        isAuthenticating = false,
-                        authenticationError = error,
-                        generalErrorMessage = failureMessage
-                    )
+                    it.copy(isAuthenticating = false, generalErrorMessage = failureMessage)
                 }
                 return@launch
-            }
-
-            // Credentialele (hash-ul parolei) ajung in baza de date locala, ca urmatorul
-            // login offline sa poata verifica parola
-            try {
-                roleRepository.saveCredentials(session.email, session.ownerKey, passwordHash)
-            } catch (e: Exception) {
-                Log.w(TAG, "saveCredentials failed", e)
             }
             _uiState.update { it.copy(isAuthenticating = false) }
 
@@ -248,6 +189,85 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             } else {
                 onSessionUnlocked()
                 userPreferencesRepository.save(session)
+            }
+        }
+    }
+
+    /**
+     * Autentificare. NU creeaza conturi noi:
+     *  1. serverul verifica e-mailul si parola -> sesiune cu token de la server;
+     *  2. daca serverul nu raspunde, contul si parola se verifica in baza de date locala
+     *     (hash-ul salvat la inregistrare / la login-urile anterioare).
+     * Intoarce sesiunea, sau null + mesajul de eroare.
+     */
+    private suspend fun loginWithEmail(
+        email: String,
+        password: String,
+        passwordHash: String
+    ): Pair<UserPreferences?, String> {
+        if (roleRepository.isBlocked(email)) return null to RoleRepository.BLOCKED_MESSAGE
+
+        val result = authRepository.login(email, password)
+        val tokenHolder = result.getOrNull()
+        val error = result.exceptionOrNull()
+
+        if (tokenHolder != null) {
+            val session = UserPreferences(
+                email = email,
+                token = tokenHolder.token,
+                user = tokenHolder.user,
+                passwordHash = passwordHash
+            )
+            // contul confirmat de server ajunge si in baza locala, pentru login-ul offline
+            roleRepository.saveCredentials(email, session.ownerKey, passwordHash)
+            return session to ""
+        }
+
+        if (error !is java.io.IOException) {
+            // Serverul a raspuns, dar a respins datele (ex. 401)
+            Log.w(TAG, "login refused by server", error)
+            return null to "E-mail sau parolă incorecte."
+        }
+
+        // Serverul nu poate fi contactat -> verificare in baza de date locala
+        return when (roleRepository.checkOffline(email, password)) {
+            RoleRepository.OfflineCheck.VALID -> {
+                val account = roleRepository.findAccount(email)
+                UserPreferences(
+                    email = email,
+                    token = "local-" + java.util.UUID.randomUUID().toString(),
+                    // pastram id-ul de pe server (daca exista), ca postarile contului sa ramana ale lui
+                    user = User(email, "", account?.ownerKey?.toIntOrNull() ?: 0),
+                    passwordHash = passwordHash
+                ) to ""
+            }
+            RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT ->
+                null to "Nu există niciun cont cu acest e-mail. Creați unul din tab-ul Înregistrare."
+            RoleRepository.OfflineCheck.WRONG_PASSWORD ->
+                null to "Parola este incorectă."
+            RoleRepository.OfflineCheck.BLOCKED ->
+                null to RoleRepository.BLOCKED_MESSAGE
+        }
+    }
+
+    /**
+     * Inregistrare: contul nou se creeaza in baza de date locala, cu hash-ul parolei.
+     * Daca e-mailul are deja cont, inregistrarea e refuzata.
+     */
+    private suspend fun registerAccount(email: String, passwordHash: String): Pair<UserPreferences?, String> {
+        return when (roleRepository.registerAccount(email, passwordHash)) {
+            RoleRepository.RegisterResult.ALREADY_EXISTS ->
+                null to "Există deja un cont cu acest e-mail. Folosiți tab-ul Autentificare."
+            RoleRepository.RegisterResult.BLOCKED ->
+                null to RoleRepository.BLOCKED_MESSAGE
+            RoleRepository.RegisterResult.CREATED -> {
+                val account = roleRepository.findAccount(email)
+                UserPreferences(
+                    email = email,
+                    token = "local-" + java.util.UUID.randomUUID().toString(),
+                    user = User(email, "", account?.ownerKey?.toIntOrNull() ?: 0),
+                    passwordHash = passwordHash
+                ) to ""
             }
         }
     }
