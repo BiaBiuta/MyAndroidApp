@@ -64,14 +64,19 @@ class AdminViewModel(
         }
     }
 
-    fun deleteReportedPost(reported: ReportedPost) = runAdmin("Postarea a fost eliminată.") {
+    /** Da dreptate raportarilor: postarea e eliminata, iar cei care au raportat vad mesajul adminului. */
+    fun deleteReportedPost(reported: ReportedPost, reply: String) = runAdmin("Postarea a fost eliminată, iar raportările au primit răspuns.") {
         val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
-        postRepository.deletePost(reported.post.id, admin.email)
+        val text = reply.trim().ifBlank { DEFAULT_RESOLVED_REPLY }
+        postRepository.resolveReportsByDeleting(reported.post.id, admin.email, text)
         null
     }
 
-    fun dismissReports(reported: ReportedPost) = runAdmin("Raportările au fost respinse.") {
-        postRepository.dismissReports(reported.post.id)
+    /** Respinge raportarile: postarea ramane, iar cei care au raportat vad mesajul adminului. */
+    fun dismissReports(reported: ReportedPost, reply: String) = runAdmin("Raportările au fost respinse.") {
+        val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
+        val text = reply.trim().ifBlank { DEFAULT_REJECTED_REPLY }
+        postRepository.rejectReports(reported.post.id, admin.email, text)
         null
     }
 
@@ -88,6 +93,9 @@ class AdminViewModel(
     ) { userRepository.setBlocked(user.email, !user.isBlocked) }
 
     companion object {
+        const val DEFAULT_RESOLVED_REPLY = "Mulțumim! Postarea încălca regulile și a fost eliminată."
+        const val DEFAULT_REJECTED_REPLY = "Am verificat postarea și nu încalcă regulile comunității."
+
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app =

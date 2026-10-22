@@ -77,6 +77,10 @@ class PostsViewModel(
     fun canDelete(post: Post, user: UserEntity?): Boolean =
         user != null && (user.isAdmin || post.user_id == user.ownerKey)
 
+    /** Doar autorul isi poate edita postarea (adminul modereaza, nu rescrie postarile altora). */
+    fun canEdit(post: Post, user: UserEntity?): Boolean =
+        user != null && !user.isBlocked && post.user_id.isNotEmpty() && post.user_id == user.ownerKey
+
     /** Doar USER (nu admin, nu vizitator) poate raporta postarile altora. */
     fun canReport(post: Post, user: UserEntity?): Boolean =
         user != null && !user.isAdmin && post.user_id != user.ownerKey

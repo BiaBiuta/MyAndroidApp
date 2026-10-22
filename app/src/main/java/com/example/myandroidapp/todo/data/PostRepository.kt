@@ -16,6 +16,7 @@ import com.example.myandroidapp.todo.data.local.HiddenPostEntity
 import com.example.myandroidapp.todo.data.local.ModerationDao
 import com.example.myandroidapp.todo.data.local.ReportEntity
 import com.example.myandroidapp.todo.data.local.ReportedPost
+import com.example.myandroidapp.todo.data.local.ReportStatus
 import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
@@ -56,27 +57,59 @@ class PostRepository(
 
     // ---------- Moderare (roluri) ----------
 
-    /** Utilizatorul raporteaza o postare (o singura raportare per utilizator). */
+    /** Utilizatorul raporteaza o postare (o singura raportare per utilizator si postare). */
     suspend fun reportPost(postId: String, reporterId: String, reason: String) {
-        moderationDao.insertReport(ReportEntity(postId, reporterId, reason))
+        val snippet = itemDao.findById(postId)?.description.orEmpty().take(140)
+        moderationDao.insertReport(
+            ReportEntity(postId = postId, reporterId = reporterId, reason = reason, postSnippet = snippet)
+        )
     }
 
+    /** Admin: postarile cu raportari la care inca nu s-a raspuns. */
     fun reportedPosts(): Flow<List<ReportedPost>> = moderationDao.observeReportedPosts()
 
     fun reportedBy(reporterId: String): Flow<List<String>> = moderationDao.observeReportedBy(reporterId)
 
-    /** Adminul respinge raportarile unei postari (postarea ramane). */
-    suspend fun dismissReports(postId: String) {
-        moderationDao.deleteReportsFor(postId)
+    /** "Raportarile mele": raportarile utilizatorului, cu statusul si raspunsul adminului. */
+    fun reportsOf(reporterId: String): Flow<List<ReportEntity>> = moderationDao.observeReportsOf(reporterId)
+
+    /** Adminul respinge raportarile unei postari (postarea ramane) si le trimite un mesaj. */
+    suspend fun rejectReports(postId: String, adminId: String, reply: String) {
+        moderationDao.answerReports(
+            postId = postId,
+            status = ReportStatus.REJECTED,
+            reply = reply,
+            adminId = adminId,
+            resolvedAt = System.currentTimeMillis()
+        )
+    }
+
+    /** Adminul da dreptate raportarilor: postarea e eliminata, iar cei care au raportat primesc mesajul. */
+    suspend fun resolveReportsByDeleting(postId: String, adminId: String, reply: String) {
+        moderationDao.answerReports(
+            postId = postId,
+            status = ReportStatus.RESOLVED,
+            reply = reply,
+            adminId = adminId,
+            resolvedAt = System.currentTimeMillis()
+        )
+        deletePost(postId, adminId)
     }
 
     /**
      * Sterge o postare (autorul ei sau un admin). O ascundem local imediat, apoi
      * incercam si pe server; daca serverul nu raspunde, ramane ascunsa pe acest telefon.
+     * Raportarile inca deschise ale postarii se inchid automat, cu un mesaj pentru cei care au raportat.
      */
     suspend fun deletePost(postId: String, actorId: String) {
         moderationDao.hide(HiddenPostEntity(postId, actorId))
-        moderationDao.deleteReportsFor(postId)
+        moderationDao.answerReports(
+            postId = postId,
+            status = ReportStatus.RESOLVED,
+            reply = "Postarea a fost ștearsă.",
+            adminId = actorId,
+            resolvedAt = System.currentTimeMillis()
+        )
         itemDao.deleteById(postId)
         if (postId.startsWith("local-") || postId.startsWith("private-")) return
         try {
@@ -84,6 +117,33 @@ class PostRepository(
             Log.d(TAG, "server delete $postId -> ${response.code()}")
         } catch (e: Exception) {
             Log.w(TAG, "server delete failed, postarea ramane ascunsa local", e)
+        }
+    }
+
+    // ---------- Editare (Update din CRUD) ----------
+
+    suspend fun findPost(id: String): Post? = itemDao.findById(id)
+
+    /** Rezultatul editarii: salvata si pe server, sau doar pe telefon (server indisponibil). */
+    enum class UpdateResult { SAVED, SAVED_LOCALLY_ONLY }
+
+    /**
+     * Editeaza o postare publica. Modificarea se scrie imediat in baza de date locala
+     * (lista se actualizeaza singura), apoi se trimite la server.
+     *  - postare creata offline (inca netrimisa): ramane de trimis, cu continutul nou
+     *  - server indisponibil: modificarea ramane pe telefon
+     */
+    suspend fun updatePost(post: Post): UpdateResult {
+        val now = java.util.Date().toInstant().toString()
+        val edited = post.copy(updated_at = now)
+        itemDao.insert(edited)
+        if (edited.isNotSaved || edited.id.startsWith("local-")) return UpdateResult.SAVED_LOCALLY_ONLY
+        return try {
+            postService.update(itemId = edited.id, item = edited, authorization = getBearerToken())
+            UpdateResult.SAVED
+        } catch (e: Exception) {
+            Log.w(TAG, "server update failed, modificarea ramane pe telefon", e)
+            UpdateResult.SAVED_LOCALLY_ONLY
         }
     }
 
@@ -324,7 +384,7 @@ class PostRepository(
     /** La Logout: stergem postarile publice din cache. Cele private raman pe telefon,
      *  ascunse; le vede doar proprietarul lor, dupa ce se logheaza din nou. */
     suspend fun deleteAll() {
-        itemDao.deleteAllPublic()
+        itemDao.deleteAllPublicSynced()
     }
 
     fun setToken(token: String) {

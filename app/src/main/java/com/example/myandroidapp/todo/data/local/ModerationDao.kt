@@ -10,13 +10,33 @@ import androidx.room.Query
 import com.example.myandroidapp.todo.data.Post
 import kotlinx.coroutines.flow.Flow
 
-/** Raportarea unei postari de catre un utilizator (o singura raportare per utilizator). */
+/** Starea unei raportari. */
+object ReportStatus {
+    // trimisa, asteapta decizia unui admin
+    const val PENDING = "PENDING"
+    // adminul a dat dreptate raportarii: postarea a fost eliminata
+    const val RESOLVED = "RESOLVED"
+    // adminul a respins raportarea: postarea ramane
+    const val REJECTED = "REJECTED"
+}
+
+/**
+ * Raportarea unei postari de catre un utilizator (o singura raportare per utilizator si postare),
+ * impreuna cu decizia si raspunsul adminului.
+ */
 @Entity(tableName = "reports", primaryKeys = ["postId", "reporterId"])
 data class ReportEntity(
     val postId: String,
     val reporterId: String,
     val reason: String,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    // textul postarii in momentul raportarii (postarea poate fi stearsa ulterior)
+    val postSnippet: String = "",
+    val status: String = ReportStatus.PENDING,
+    // mesajul adminului catre utilizatorul care a raportat
+    val adminReply: String = "",
+    val resolvedBy: String = "",
+    val resolvedAt: Long = 0
 )
 
 /**
@@ -30,7 +50,7 @@ data class HiddenPostEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
-/** O postare raportata, cu numarul de raportari si motivele (pentru admin). */
+/** O postare cu raportari in asteptare, cu numarul lor si motivele (pentru admin). */
 data class ReportedPost(
     @Embedded val post: Post,
     val reportCount: Int,
@@ -42,11 +62,12 @@ interface ModerationDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertReport(report: ReportEntity)
 
+    // Admin: doar raportarile la care inca nu s-a raspuns
     @Query(
         "SELECT p.*, COUNT(r.reporterId) AS reportCount, GROUP_CONCAT(r.reason, ' • ') AS reasons " +
-            "FROM posts p INNER JOIN reports r ON r.postId = p.id " +
-            "WHERE p.id NOT IN (SELECT postId FROM hidden_posts) " +
-            "GROUP BY p.id ORDER BY reportCount DESC"
+                "FROM posts p INNER JOIN reports r ON r.postId = p.id " +
+                "WHERE r.status = 'PENDING' AND p.id NOT IN (SELECT postId FROM hidden_posts) " +
+                "GROUP BY p.id ORDER BY reportCount DESC"
     )
     fun observeReportedPosts(): Flow<List<ReportedPost>>
 
@@ -54,8 +75,16 @@ interface ModerationDao {
     @Query("SELECT postId FROM reports WHERE reporterId = :reporterId")
     fun observeReportedBy(reporterId: String): Flow<List<String>>
 
-    @Query("DELETE FROM reports WHERE postId = :postId")
-    suspend fun deleteReportsFor(postId: String)
+    // "Raportarile mele": toate raportarile utilizatorului, cu statusul si raspunsul adminului
+    @Query("SELECT * FROM reports WHERE reporterId = :reporterId ORDER BY createdAt DESC")
+    fun observeReportsOf(reporterId: String): Flow<List<ReportEntity>>
+
+    /** Adminul raspunde tuturor raportarilor in asteptare ale unei postari. */
+    @Query(
+        "UPDATE reports SET status = :status, adminReply = :reply, resolvedBy = :adminId, " +
+                "resolvedAt = :resolvedAt WHERE postId = :postId AND status = 'PENDING'"
+    )
+    suspend fun answerReports(postId: String, status: String, reply: String, adminId: String, resolvedAt: Long)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun hide(hidden: HiddenPostEntity)

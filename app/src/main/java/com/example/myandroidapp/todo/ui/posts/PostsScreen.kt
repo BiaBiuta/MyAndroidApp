@@ -22,6 +22,7 @@ import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Person
 import com.example.myandroidapp.auth.data.local.UserEntity
@@ -55,7 +56,11 @@ fun PostsScreen(
     // doar USER: postarile proprii
     onOpenMyPosts: () -> Unit = {},
     // doar ADMIN: moderare + gestionare utilizatori
-    onOpenAdmin: () -> Unit = {}
+    onOpenAdmin: () -> Unit = {},
+    // doar USER: raportarile trimise, cu statusul si raspunsul adminului
+    onOpenMyReports: () -> Unit = {},
+    // doar autorul: editarea postarii proprii
+    onEditPost: (id: String) -> Unit = {}
 ) {
     Log.d("PostsScreen", "recompose")
 
@@ -129,6 +134,7 @@ fun PostsScreen(
             RoleBar(
                 user = currentUser,
                 onOpenMyPosts = onOpenMyPosts,
+                onOpenMyReports = onOpenMyReports,
                 onOpenAdmin = onOpenAdmin
             )
             if (itemsViewModel.isRefreshing) {
@@ -155,7 +161,9 @@ fun PostsScreen(
                         canReport = itemsViewModel.canReport(post, currentUser),
                         alreadyReported = post.id in reportedByMe,
                         onDelete = { postToDelete = post },
-                        onReport = { postToReport = post }
+                        onReport = { postToReport = post },
+                        canEdit = itemsViewModel.canEdit(post, currentUser),
+                        onEdit = { onEditPost(post.id) }
                     )
                 }
             )
@@ -264,36 +272,56 @@ fun PreviewPostsScreen() {
 }
 
 
-/** Banda de sub bara de sus: rolul curent si butonul catre functionalitatea unica a rolului. */
+/**
+ * Banda de sub bara de sus: rolul curent si butoanele catre functionalitatile unice ale rolului.
+ *  - ADMIN: Administrare
+ *  - USER: Postarile mele, Raportarile mele
+ */
 @Composable
-fun RoleBar(user: UserEntity?, onOpenMyPosts: () -> Unit, onOpenAdmin: () -> Unit) {
+fun RoleBar(
+    user: UserEntity?,
+    onOpenMyPosts: () -> Unit,
+    onOpenAdmin: () -> Unit,
+    onOpenMyReports: () -> Unit = {}
+) {
     Surface(
         color = if (user?.isAdmin == true) Color(0xFFFFF3E0) else Color(0xFFE8EAF6),
         modifier = Modifier.fillMaxWidth()
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = if (user?.isAdmin == true) Icons.Default.AdminPanelSettings else Icons.Default.Person,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Text(
-                text = when {
-                    user == null -> "Vizitator (fără cont)"
-                    user.isAdmin -> "Administrator · ${user.email}"
-                    else -> "Utilizator · ${user.email}"
-                },
-                style = MaterialTheme.typography.body2,
-                modifier = Modifier.weight(1f)
-            )
-            when {
-                user == null -> {}
-                user.isAdmin -> TextButton(onClick = onOpenAdmin) { Text("Administrare") }
-                else -> TextButton(onClick = onOpenMyPosts) { Text("Postările mele") }
+        Column {
+            Row(
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (user?.isAdmin == true) Icons.Default.AdminPanelSettings else Icons.Default.Person,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = when {
+                        user == null -> "Vizitator (fără cont)"
+                        user.isAdmin -> "Administrator · ${user.email}"
+                        else -> "Utilizator · ${user.email}"
+                    },
+                    style = MaterialTheme.typography.body2,
+                    modifier = Modifier.weight(1f)
+                )
+                if (user != null && user.isAdmin) {
+                    TextButton(onClick = onOpenAdmin) { Text("Administrare") }
+                }
+            }
+            if (user != null && !user.isAdmin) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.End
+                ) {
+                    TextButton(onClick = onOpenMyPosts) { Text("Postările mele") }
+                    TextButton(onClick = onOpenMyReports) { Text("Raportările mele") }
+                }
             }
         }
     }
@@ -302,7 +330,7 @@ fun RoleBar(user: UserEntity?, onOpenMyPosts: () -> Unit, onOpenAdmin: () -> Uni
 /**
  * Butoanele de sub o postare, in functie de rol:
  *  - ADMIN: Sterge (orice postare)
- *  - USER: Sterge (doar postarile proprii) si Raporteaza (postarile altora)
+ *  - USER: Editeaza + Sterge (doar postarile proprii) si Raporteaza (postarile altora)
  */
 @Composable
 fun PostRoleActions(
@@ -310,9 +338,11 @@ fun PostRoleActions(
     canReport: Boolean,
     alreadyReported: Boolean,
     onDelete: () -> Unit,
-    onReport: () -> Unit
+    onReport: () -> Unit,
+    canEdit: Boolean = false,
+    onEdit: () -> Unit = {}
 ) {
-    if (!canDelete && !canReport) return
+    if (!canDelete && !canReport && !canEdit) return
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -322,6 +352,13 @@ fun PostRoleActions(
                 Icon(Icons.Default.Flag, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(if (alreadyReported) "Raportat" else "Raportează")
+            }
+        }
+        if (canEdit) {
+            TextButton(onClick = onEdit) {
+                Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Editează")
             }
         }
         if (canDelete) {
@@ -349,7 +386,7 @@ fun ReportPostDialog(onDismiss: () -> Unit, onConfirm: (String) -> Unit) {
         title = { Text("Raportează postarea") },
         text = {
             Column {
-                Text("De ce raportați această postare? Un administrator o va verifica.")
+                Text("De ce raportați această postare? Un administrator o va verifica, iar răspunsul lui apare la „Raportările mele”.")
                 Spacer(modifier = Modifier.height(8.dp))
                 REPORT_REASONS.forEach { reason ->
                     Row(

@@ -7,6 +7,8 @@ import androidx.compose.ui.platform.LocalContext
 import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.todo.ui.admin.AdminScreen
 import com.example.myandroidapp.todo.ui.myposts.MyPostsScreen
+import com.example.myandroidapp.todo.ui.myreports.MyReportsScreen
+import com.example.myandroidapp.todo.ui.edit.EditPostScreen
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -19,11 +21,14 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
+import androidx.navigation.NavType
+import androidx.navigation.navArgument
+import android.net.Uri
 import androidx.navigation.compose.rememberNavController
 import com.example.myandroidapp.auth.LoginScreen
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.todo.ui.post.PostAddScreen
-import com.example.myandroidapp.todo.ui. privateposts.PrivatePostsScreen
+import com.example.myandroidapp.todo.ui.privateposts.PrivatePostsScreen
 import com.example.myapplication.todo.ui.items.PostsScreen
 // ATENTIE: SessionState e cel din MyAppViewModel.kt (acelasi pachet), NU importati
 // com.google.android.gms.cast.SessionState daca Android Studio il propune.
@@ -34,6 +39,8 @@ val authRoute = "auth"
 val privateRoute = "private"
 val myPostsRoute = "my-posts"
 val adminRoute = "admin"
+val myReportsRoute = "my-reports"
+val editPostRoute = "posts/edit"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -92,11 +99,38 @@ fun MyAppNavHost() {
                     navController.navigate(privateRoute)
                 },
                 onOpenMyPosts = { navController.navigate(myPostsRoute) },
-                onOpenAdmin = { navController.navigate(adminRoute) })
+                onOpenAdmin = { navController.navigate(adminRoute) },
+                onOpenMyReports = { navController.navigate(myReportsRoute) },
+                onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") })
         }
         // Doar rolul USER
         composable(route = myPostsRoute) {
-            MyPostsScreen(onBack = { navController.popBackStack() })
+            MyPostsScreen(
+                onBack = { navController.popBackStack() },
+                onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
+            )
+        }
+        // Doar rolul USER: raportarile trimise, cu statusul si raspunsul adminului
+        composable(route = myReportsRoute) {
+            if (currentUser != null && currentUser?.isAdmin != true) {
+                MyReportsScreen(onBack = { navController.popBackStack() })
+            } else {
+                LaunchedEffect(Unit) { navController.popBackStack() }
+            }
+        }
+        // Editarea unei postari proprii (dreptul e verificat si in EditPostViewModel)
+        composable(
+            route = "$editPostRoute/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { entry ->
+            val context = LocalContext.current
+            EditPostScreen(
+                postId = entry.arguments?.getString("id").orEmpty(),
+                onClose = { message ->
+                    message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
+                    navController.popBackStack()
+                }
+            )
         }
         // Doar rolul ADMIN (actiunile sunt verificate si in RoleRepository)
         composable(route = adminRoute) {

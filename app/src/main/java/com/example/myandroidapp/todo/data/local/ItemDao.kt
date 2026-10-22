@@ -30,6 +30,10 @@ interface ItemDao {
     @Query("SELECT * FROM Posts WHERE isPrivate = 1 AND user_id = :ownerKey ORDER BY created_at DESC")
     fun getPrivate(ownerKey: String): Flow<List<Post>>
 
+    // Editare: postarea dupa id
+    @Query("SELECT * FROM Posts WHERE id = :id")
+    suspend fun findById(id: String): Post?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(item: Post)
 

@@ -14,9 +14,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.AssistChip
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -24,6 +26,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -38,6 +41,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +64,8 @@ fun AdminScreen(onBack: () -> Unit) {
     val users by viewModel.users.collectAsStateWithLifecycle(initialValue = emptyList())
     val me by viewModel.currentUser.collectAsStateWithLifecycle()
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    // Dialogul de raspuns: postarea + decizia (true = sterge postarea, false = respinge)
+    var answering by remember { mutableStateOf<Pair<ReportedPost, Boolean>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel.message) {
@@ -108,8 +114,8 @@ fun AdminScreen(onBack: () -> Unit) {
                 0 -> ReportedPostsList(
                     reported = reported,
                     enabled = !viewModel.busy,
-                    onDelete = viewModel::deleteReportedPost,
-                    onDismiss = viewModel::dismissReports
+                    onDelete = { answering = it to true },
+                    onDismiss = { answering = it to false }
                 )
                 else -> UsersList(
                     users = users,
@@ -121,6 +127,66 @@ fun AdminScreen(onBack: () -> Unit) {
             }
         }
     }
+
+    answering?.let { (item, delete) ->
+        AnswerReportDialog(
+            reported = item,
+            deletePost = delete,
+            onDismiss = { answering = null },
+            onConfirm = { reply ->
+                if (delete) viewModel.deleteReportedPost(item, reply) else viewModel.dismissReports(item, reply)
+                answering = null
+            }
+        )
+    }
+}
+
+/** Adminul scrie raspunsul pe care il vor vedea utilizatorii care au raportat postarea. */
+@Composable
+private fun AnswerReportDialog(
+    reported: ReportedPost,
+    deletePost: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (String) -> Unit
+) {
+    var reply by rememberSaveable {
+        mutableStateOf(
+            if (deletePost) AdminViewModel.DEFAULT_RESOLVED_REPLY else AdminViewModel.DEFAULT_REJECTED_REPLY
+        )
+    }
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(if (deletePost) "Șterge postarea" else "Respinge raportările") },
+        text = {
+            Column {
+                Text(
+                    if (deletePost) "Postarea va fi eliminată, iar raportările marcate ca rezolvate."
+                    else "Postarea rămâne, iar raportările sunt marcate ca respinse.",
+                    style = MaterialTheme.typography.bodyMedium
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "${reported.reportCount} utilizatori vor vedea mesajul în „Raportările mele”.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = reply,
+                    onValueChange = { if (it.length <= 300) reply = it },
+                    label = { Text("Mesaj pentru utilizatori") },
+                    minLines = 3,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onConfirm(reply) }, enabled = reply.isNotBlank()) {
+                Text(if (deletePost) "Șterge și trimite" else "Respinge și trimite")
+            }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Anulează") } }
+    )
 }
 
 @Composable

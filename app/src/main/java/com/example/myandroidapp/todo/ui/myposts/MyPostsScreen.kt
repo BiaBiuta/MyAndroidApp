@@ -98,7 +98,7 @@ class MyPostsViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MyPostsScreen(onBack: () -> Unit) {
+fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}) {
     val viewModel = viewModel<MyPostsViewModel>(factory = MyPostsViewModel.Factory)
     val posts by viewModel.myPosts.collectAsStateWithLifecycle(initialValue = emptyList())
     val snackbarHostState = remember { SnackbarHostState() }
@@ -153,7 +153,9 @@ fun MyPostsScreen(onBack: () -> Unit) {
                                 canReport = false,
                                 alreadyReported = false,
                                 onDelete = { postToDelete = post },
-                                onReport = {}
+                                onReport = {},
+                                canEdit = true,
+                                onEdit = { onEditPost(post.id) }
                             )
                         }
                     )
