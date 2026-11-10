@@ -1,5 +1,6 @@
 package com.example.myandroidapp
 
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import androidx.lifecycle.ViewModel
@@ -19,6 +20,9 @@ import kotlinx.coroutines.flow.asStateFlow
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import com.example.myandroidapp.auth.BiometricChoiceStore
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -87,6 +91,33 @@ class MyAppViewModel(
                     logout {}
                 }
             }
+        }
+    }
+
+    /** Amprenta e activata pentru sesiunea curenta (comutatorul din ecranul principal). */
+    val biometricEnabled: StateFlow<Boolean> = userPreferencesRepository.userPreferencesStream
+        .map { it.biometricEnabled }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /**
+     * Activeaza / dezactiveaza amprenta pentru contul logat. Alegerea se tine minte si
+     * pentru login-urile urmatoare (dialogul de dupa login nu mai apare).
+     * Merge doar pentru sesiunile cu e-mail si parola (Google / Apple / anonim nu au sesiune salvata).
+     */
+    fun setBiometricEnabled(context: Context, enabled: Boolean) {
+        viewModelScope.launch {
+            val prefs = userPreferencesRepository.userPreferencesStream.first()
+            if (prefs.token.isEmpty()) return@launch
+            BiometricChoiceStore(context).record(prefs.email, enabled)
+            userPreferencesRepository.save(
+                UserPreferences(
+                    email = prefs.email,
+                    token = prefs.token,
+                    user = prefs.user,
+                    biometricEnabled = enabled,
+                    passwordHash = prefs.passwordHash
+                )
+            )
         }
     }
 

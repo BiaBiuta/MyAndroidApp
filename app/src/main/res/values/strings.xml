@@ -2,4 +2,51 @@
     <string name="app_name">MyAndroidApp</string>
     <string name="posts">Posts</string>
     <string name="login">Login</string>
+
+    <!-- Ecranul de autentificare -->
+    <string name="auth_brand">WanderLog</string>
+    <string name="auth_logo_description">Logo WanderLog</string>
+    <string name="auth_subtitle_login">Conectează-te în jurnalul tău de călătorii</string>
+    <string name="auth_subtitle_register">Creează un cont nou de explorator</string>
+    <string name="auth_tab_login">Autentificare</string>
+    <string name="auth_tab_register">Înregistrare</string>
+    <string name="auth_email_label">Adresă de e-mail</string>
+    <string name="auth_email_placeholder">nume@exemplu.ro</string>
+    <string name="auth_password_label">Parolă</string>
+    <string name="auth_password_hint">Minim 6 caractere</string>
+    <string name="auth_confirm_password_label">Confirmă parola</string>
+    <string name="auth_show_password">Arată parola</string>
+    <string name="auth_hide_password">Ascunde parola</string>
+    <string name="auth_error_icon">Eroare</string>
+    <string name="auth_submit_login">Conectare</string>
+    <string name="auth_submit_register">Înregistrează-te</string>
+    <string name="auth_loading_email">Se verifică datele…</string>
+    <string name="auth_or">sau</string>
+    <!-- Texte aprobate de Google / Apple pentru butoanele de autentificare (varianta „Continuați cu”) -->
+    <string name="auth_google">Continuați cu Google</string>
+    <string name="auth_apple">Continuați cu Apple</string>
+    <string name="auth_anonymous">Explorează ca vizitator anonim</string>
+    <string name="auth_loading_provider">Se conectează…</string>
+    <string name="auth_provider_note">Google, Apple și vizitatorul anonim sunt demo-uri: intri fără cont salvat.</string>
+
+    <!-- Biometrie -->
+    <string name="bio_locked_title">Sesiune blocată</string>
+    <string name="bio_locked_body">Deblochează cu amprenta sau conectează-te mai jos cu e-mail și parola.</string>
+    <string name="bio_unlock_button">Deblochează cu amprenta</string>
+    <string name="bio_prompt_title">Deblocare WanderLog</string>
+    <string name="bio_prompt_subtitle">Atingeți senzorul pentru a debloca sesiunea curentă</string>
+    <string name="bio_prompt_fallback">Folosește e-mail și parola</string>
+    <string name="bio_failed">Amprentă nerecunoscută. Încearcă din nou.</string>
+    <string name="bio_fallback_hint">Poți intra oricând cu e-mail și parola din formularul de mai jos.</string>
+    <string name="bio_no_hardware">Telefonul nu are senzor biometric. Folosește e-mail și parola.</string>
+    <string name="bio_hw_unavailable">Senzorul biometric este indisponibil momentan. Folosește e-mail și parola.</string>
+    <string name="bio_none_enrolled">Nu există nicio amprentă înregistrată pe telefon. Folosește e-mail și parola.</string>
+    <string name="bio_no_activity">Amprenta nu poate fi afișată pe acest ecran. Folosește e-mail și parola.</string>
+    <string name="bio_success">Amprentă recunoscută. Se deschide sesiunea…</string>
+    <string name="bio_onboarding_title">Activează autentificarea biometrică</string>
+    <string name="bio_onboarding_body">Data viitoare îți poți debloca sesiunea doar cu amprenta, mai rapid și în siguranță. Poți schimba oricând alegerea din ecranul principal.</string>
+    <string name="bio_onboarding_enroll_body">Pe acest telefon nu este înregistrată nicio amprentă. Adaugă una acum, iar data viitoare îți vei putea debloca sesiunea doar cu amprenta.</string>
+    <string name="bio_onboarding_enable">Activează</string>
+    <string name="bio_onboarding_enroll">Adaugă amprenta</string>
+    <string name="bio_onboarding_later">Nu acum</string>
 </resources>

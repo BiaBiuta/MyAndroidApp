@@ -20,6 +20,9 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
+/** Metoda de autentificare aflata in curs -> doar butonul ei arata indicatorul de incarcare. */
+enum class AuthMethod { EMAIL, GOOGLE, APPLE, ANONYMOUS }
+
 data class LoginUiState(
     val isLoginMode: Boolean = true,
     val email: String = "",
@@ -29,6 +32,7 @@ data class LoginUiState(
     val confirmPassword: String = "",
     val confirmPasswordError: String? = null,
     val isAuthenticating: Boolean = false,
+    val activeMethod: AuthMethod? = null,
     val authenticationError: Throwable? = null,
     val generalErrorMessage: String? = null,
     val isSuccess: Boolean = false,
@@ -44,6 +48,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val authRepository = container.authRepository
     private val userPreferencesRepository = container.userPreferencesRepository
     private val roleRepository = container.roleRepository
+    private val biometricChoices = BiometricChoiceStore(application)
 
     // Sesiunea (token + user) primita la login. O salvam abia dupa ce utilizatorul
     // raspunde la dialogul de activare a amprentei, impreuna cu alegerea lui.
@@ -154,7 +159,9 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
 
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
+            _uiState.update {
+                it.copy(isAuthenticating = true, activeMethod = AuthMethod.EMAIL, generalErrorMessage = null)
+            }
 
             // Hash-ul parolei (PBKDF2 cu salt): se salveaza in baza de date locala.
             // Parola in clar nu se salveaza niciodata.
@@ -171,14 +178,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
             if (session == null) {
                 _uiState.update {
-                    it.copy(isAuthenticating = false, generalErrorMessage = failureMessage)
+                    it.copy(isAuthenticating = false, activeMethod = null, generalErrorMessage = failureMessage)
                 }
                 return@launch
             }
-            _uiState.update { it.copy(isAuthenticating = false) }
+            _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
 
-            if (biometricHardwarePresent()) {
-                // Prima conectare -> intrebam daca activeaza amprenta
+            val previousChoice = biometricChoices.choiceFor(session.email)
+            if (biometricHardwarePresent() && previousChoice == null) {
+                // Prima conectare a acestui cont -> intrebam o singura data daca activeaza amprenta
                 pendingSession = session
                 _uiState.update {
                     it.copy(
@@ -187,8 +195,12 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     )
                 }
             } else {
+                // Cont cunoscut (ex. fallback cu parola dupa ce amprenta a esuat):
+                // reaplicam alegerea salvata, fara sa mai afisam dialogul.
                 onSessionUnlocked()
-                userPreferencesRepository.save(session)
+                userPreferencesRepository.save(
+                    session.withBiometric(previousChoice == true && biometricAvailable())
+                )
             }
         }
     }
@@ -274,43 +286,41 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     // Google / Apple / anonim sunt demo si nu au token, deci nu creeaza o sesiune salvata:
     // nu pot fi deblocate ulterior cu amprenta si nu au sectiune privata.
-    fun signInWithProvider(provider: String, onEnterWithoutSession: () -> Unit) {
+    fun signInWithProvider(method: AuthMethod, onEnterWithoutSession: () -> Unit) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
-            delay(600)
-            _uiState.update { it.copy(isAuthenticating = false) }
+            _uiState.update {
+                it.copy(isAuthenticating = true, activeMethod = method, generalErrorMessage = null)
+            }
+            delay(900)
+            _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
             onEnterWithoutSession()
         }
     }
 
-    fun signInAnonymously(onEnterWithoutSession: () -> Unit) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isAuthenticating = true, generalErrorMessage = null) }
-            delay(400)
-            _uiState.update { it.copy(isAuthenticating = false) }
-            onEnterWithoutSession()
-        }
-    }
+    fun signInAnonymously(onEnterWithoutSession: () -> Unit) =
+        signInWithProvider(AuthMethod.ANONYMOUS, onEnterWithoutSession)
 
     /** Raspunsul la dialogul "Activează autentificarea biometrică". */
     fun setBiometricsEnabled(enable: Boolean, onSessionUnlocked: () -> Unit) {
         _uiState.update { it.copy(showBiometricOnboardingPrompt = false) }
         val session = pendingSession ?: return
         pendingSession = null
+        // Raspunsul se tine minte -> dialogul nu mai apare la urmatoarele login-uri ale contului
+        biometricChoices.record(session.email, enable)
         // Deblocam inainte sa salvam, ca sa nu se ridice imediat sheet-ul de amprenta.
         onSessionUnlocked()
         viewModelScope.launch {
-            userPreferencesRepository.save(
-                UserPreferences(
-                    email = session.email,
-                    token = session.token,
-                    user = session.user,
-                    biometricEnabled = enable,
-                    passwordHash = session.passwordHash
-                )
-            )
+            userPreferencesRepository.save(session.withBiometric(enable))
         }
     }
+
+    private fun UserPreferences.withBiometric(enabled: Boolean) = UserPreferences(
+        email = email,
+        token = token,
+        user = user,
+        biometricEnabled = enabled,
+        passwordHash = passwordHash
+    )
 
     /** Apelat cand utilizatorul revine din ecranul de sistem pentru adaugarea amprentei. */
     fun onEnrollmentFinished(onSessionUnlocked: () -> Unit) {

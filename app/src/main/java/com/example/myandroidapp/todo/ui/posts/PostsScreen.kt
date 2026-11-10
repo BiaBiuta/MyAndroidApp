@@ -23,12 +23,14 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Person
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.todo.data.Post
 import androidx.compose.ui.platform.LocalContext
+import androidx.biometric.BiometricManager
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
@@ -60,7 +62,11 @@ fun PostsScreen(
     // doar USER: raportarile trimise, cu statusul si raspunsul adminului
     onOpenMyReports: () -> Unit = {},
     // doar autorul: editarea postarii proprii
-    onEditPost: (id: String) -> Unit = {}
+    onEditPost: (id: String) -> Unit = {},
+    // comutatorul de amprenta: vizibil doar pentru sesiunile salvate (login cu e-mail si parola)
+    showBiometricToggle: Boolean = false,
+    biometricEnabled: Boolean = false,
+    onBiometricToggle: (enabled: Boolean) -> Unit = {}
 ) {
     Log.d("PostsScreen", "recompose")
 
@@ -106,6 +112,41 @@ fun PostsScreen(
                         style = MaterialTheme.typography.body1,
                         color = if (myNetworkStatusViewModel.uiState) Purple80 else MaterialTheme.colors.error
                     )
+                    // Activare / dezactivare amprenta oricand, nu doar in dialogul de dupa primul login
+                    if (showBiometricToggle) {
+                        val context = LocalContext.current
+                        IconToggleButton(
+                            checked = biometricEnabled,
+                            onCheckedChange = { enable ->
+                                val available = BiometricManager.from(context)
+                                    .canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG) ==
+                                        BiometricManager.BIOMETRIC_SUCCESS
+                                coroutineScope.launch {
+                                    if (enable && !available) {
+                                        snackbarHostState.showSnackbar(
+                                            "Nu există nicio amprentă înregistrată pe telefon. Adaug-o din Setări."
+                                        )
+                                    } else {
+                                        onBiometricToggle(enable)
+                                        snackbarHostState.showSnackbar(
+                                            if (enable) "Autentificarea cu amprenta a fost activată."
+                                            else "Autentificarea cu amprenta a fost dezactivată."
+                                        )
+                                    }
+                                }
+                            }
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Fingerprint,
+                                contentDescription = if (biometricEnabled)
+                                    "Amprentă activată. Atinge pentru a dezactiva"
+                                else
+                                    "Amprentă dezactivată. Atinge pentru a activa",
+                                tint = if (biometricEnabled) androidx.compose.material3.MaterialTheme.colorScheme.primary
+                                else androidx.compose.material3.MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
                     // Sectiunea privata (cere din nou amprenta sau e-mail + parola)
                     Button(onClick = onOpenPrivate) { Text("Privat") }
                     Spacer(modifier = Modifier.width(4.dp))

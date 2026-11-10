@@ -56,6 +56,8 @@ fun MyAppNavHost() {
     val sessionState by myAppViewModel.sessionState.collectAsStateWithLifecycle()
     // Contul logat (din baza de date locala) -> rolul decide ce ecrane sunt disponibile
     val currentUser by myAppViewModel.currentUser.collectAsStateWithLifecycle()
+    val biometricEnabled by myAppViewModel.biometricEnabled.collectAsStateWithLifecycle()
+    val appContext = LocalContext.current.applicationContext
 
     // Urmarim cand aplicatia trece in fundal / revine (ex. butonul Home)
     val lifecycleOwner = LocalLifecycleOwner.current
@@ -101,7 +103,10 @@ fun MyAppNavHost() {
                 onOpenMyPosts = { navController.navigate(myPostsRoute) },
                 onOpenAdmin = { navController.navigate(adminRoute) },
                 onOpenMyReports = { navController.navigate(myReportsRoute) },
-                onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") })
+                onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
+                showBiometricToggle = sessionState is SessionState.Active,
+                biometricEnabled = biometricEnabled,
+                onBiometricToggle = { enabled -> myAppViewModel.setBiometricEnabled(appContext, enabled) })
         }
         // Doar rolul USER
         composable(route = myPostsRoute) {

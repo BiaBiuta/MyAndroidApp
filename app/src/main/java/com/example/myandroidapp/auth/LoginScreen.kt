@@ -6,13 +6,14 @@ import android.content.ContextWrapper
 import android.content.Intent
 import android.os.Build
 import android.provider.Settings
-import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.biometric.BiometricManager
 import androidx.biometric.BiometricPrompt
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -20,7 +21,6 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fingerprint
@@ -36,9 +36,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -50,6 +58,7 @@ import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.myandroidapp.R
 
 fun Context.findFragmentActivity(): FragmentActivity? {
     var currentContext = this
@@ -74,12 +83,16 @@ private fun biometricEnrollIntent(): Intent = when {
     else -> Intent(Settings.ACTION_SECURITY_SETTINGS)
 }
 
+/** Latimea maxima a formularului: pe tableta / landscape nu se intinde pe tot ecranul. */
+private val MaxFormWidth = 480.dp
+private val ButtonHeight = 48.dp
+
 /**
  * @param sessionLocked exista o sesiune salvata (token) cu amprenta activata, care asteapta
  *        deblocarea. Doar atunci amprenta poate deschide aplicatia.
  * @param onSessionUnlocked login cu parola reusit sau amprenta acceptata -> sesiunea e deblocata;
  *        MyAppNavHost navigheaza in ecranul principal cand sesiunea devine activa.
- * @param onEnterWithoutSession intrare demo fara token (Google / Apple / anonim / inregistrare).
+ * @param onEnterWithoutSession intrare demo fara token (Google / Apple / anonim).
  */
 @Composable
 fun LoginScreen(
@@ -91,7 +104,16 @@ fun LoginScreen(
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
+    val emailFocus = remember { FocusRequester() }
     var passwordVisible by remember { mutableStateOf(false) }
+
+    // Starea amprentei, afisata in ecran (nu doar Toast), ca sa fie citita si de TalkBack
+    var biometricStatus by remember { mutableStateOf<String?>(null) }
+    var biometricStatusIsError by remember { mutableStateOf(false) }
+    fun showBiometricStatus(message: String, isError: Boolean) {
+        biometricStatus = message
+        biometricStatusIsError = isError
+    }
 
     // Cand revine din Setari (adaugare amprenta), verificam daca si-a adaugat-o
     val enrollLauncher = rememberLauncherForActivityResult(
@@ -101,76 +123,69 @@ fun LoginScreen(
     }
 
     fun launchNativeBiometricPrompt() {
-        // Fara sesiune activa (inainte de primul login sau dupa Logout) amprenta e refuzata,
-        // ca nimeni sa nu poata intra doar cu amprenta fara sa se fi logat mai intai.
-        if (!sessionLocked) {
-            Toast.makeText(
-                context,
-                "Nu există o sesiune activă. Vă rugăm să vă conectați cu e-mail și parolă.",
-                Toast.LENGTH_LONG
-            ).show()
-            return
-        }
+        // Amprenta deblocheaza doar o sesiune salvata (butonul e vizibil doar atunci)
+        if (!sessionLocked) return
 
         val activity = context.findFragmentActivity()
         if (activity == null) {
-            Toast.makeText(context, "Eroare: Activitatea nu permite afișarea biometriei.", Toast.LENGTH_SHORT).show()
+            showBiometricStatus(context.getString(R.string.bio_no_activity), true)
             return
         }
 
-        val biometricManager = BiometricManager.from(context)
-        val canAuthenticate = biometricManager.canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)
-
-        when (canAuthenticate) {
+        when (BiometricManager.from(context).canAuthenticate(BiometricManager.Authenticators.BIOMETRIC_STRONG)) {
+            BiometricManager.BIOMETRIC_SUCCESS -> Unit
             BiometricManager.BIOMETRIC_ERROR_NO_HARDWARE -> {
-                Toast.makeText(context, "Dispozitivul nu are senzor biometric.", Toast.LENGTH_LONG).show()
-                return
-            }
-            BiometricManager.BIOMETRIC_ERROR_HW_UNAVAILABLE -> {
-                Toast.makeText(context, "Senzorul biometric este indisponibil momentan.", Toast.LENGTH_SHORT).show()
-                return
+                showBiometricStatus(context.getString(R.string.bio_no_hardware), true); return
             }
             BiometricManager.BIOMETRIC_ERROR_NONE_ENROLLED -> {
-                Toast.makeText(
-                    context,
-                    "Nu aveți amprentă înregistrată! Configurați un PIN și o amprentă din Setările telefonului.",
-                    Toast.LENGTH_LONG
-                ).show()
-                return
+                showBiometricStatus(context.getString(R.string.bio_none_enrolled), true); return
             }
-            BiometricManager.BIOMETRIC_SUCCESS -> { /* Senzor gata de scanare */ }
+            else -> {
+                showBiometricStatus(context.getString(R.string.bio_hw_unavailable), true); return
+            }
         }
 
-        val executor = ContextCompat.getMainExecutor(context)
         val promptInfo = BiometricPrompt.PromptInfo.Builder()
-            .setTitle("Deblocare WanderLog")
-            .setSubtitle("Atingeți senzorul pentru a debloca sesiunea curentă")
-            .setNegativeButtonText("Folosește e-mail și parola")
+            .setTitle(context.getString(R.string.bio_prompt_title))
+            .setSubtitle(context.getString(R.string.bio_prompt_subtitle))
+            .setNegativeButtonText(context.getString(R.string.bio_prompt_fallback))
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
 
         val biometricPrompt = BiometricPrompt(
             activity,
-            executor,
+            ContextCompat.getMainExecutor(context),
             object : BiometricPrompt.AuthenticationCallback() {
                 override fun onAuthenticationSucceeded(result: BiometricPrompt.AuthenticationResult) {
                     super.onAuthenticationSucceeded(result)
+                    showBiometricStatus(context.getString(R.string.bio_success), false)
                     onSessionUnlocked()
                 }
 
                 override fun onAuthenticationError(errorCode: Int, errString: CharSequence) {
                     super.onAuthenticationError(errorCode, errString)
-                    if (errorCode != BiometricPrompt.ERROR_NEGATIVE_BUTTON &&
-                        errorCode != BiometricPrompt.ERROR_USER_CANCELED &&
-                        errorCode != BiometricPrompt.ERROR_CANCELED
-                    ) {
-                        Toast.makeText(context, "$errString", Toast.LENGTH_SHORT).show()
+                    when (errorCode) {
+                        // A ales "Folosește e-mail și parola" -> mutam focusul pe formular
+                        BiometricPrompt.ERROR_NEGATIVE_BUTTON,
+                        BiometricPrompt.ERROR_USER_CANCELED -> {
+                            showBiometricStatus(context.getString(R.string.bio_fallback_hint), false)
+                            emailFocus.requestFocus()
+                        }
+                        BiometricPrompt.ERROR_CANCELED -> Unit
+                        // ex. prea multe incercari (lockout): mesajul sistemului + fallback la parola
+                        else -> {
+                            showBiometricStatus(
+                                "$errString. " + context.getString(R.string.bio_fallback_hint),
+                                true
+                            )
+                            emailFocus.requestFocus()
+                        }
                     }
                 }
 
                 override fun onAuthenticationFailed() {
                     super.onAuthenticationFailed()
-                    Toast.makeText(context, "Amprentă nerecunoscută. Încercați din nou.", Toast.LENGTH_SHORT).show()
+                    showBiometricStatus(context.getString(R.string.bio_failed), true)
                 }
             }
         )
@@ -182,38 +197,31 @@ fun LoginScreen(
         modifier = Modifier.fillMaxSize(),
         color = MaterialTheme.colorScheme.background
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier.fillMaxSize(),
+            contentAlignment = Alignment.TopCenter
+        ) {
             Column(
                 modifier = Modifier
-                    .fillMaxSize()
+                    .widthIn(max = MaxFormWidth)
+                    .fillMaxWidth()
+                    .fillMaxHeight()
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = 24.dp, vertical = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
-                Spacer(modifier = Modifier.height(16.dp))
-
-                Icon(
-                    imageVector = Icons.Default.Place,
-                    contentDescription = "Logo WanderLog",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(64.dp)
-                )
-                Spacer(modifier = Modifier.height(8.dp))
-
-                Text(
-                    text = "WanderLog",
-                    style = MaterialTheme.typography.headlineLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
-                Text(
-                    text = if (state.isLoginMode) "Conectează-te în jurnalul tău de călătorii" else "Creează un cont nou de explorator",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    textAlign = TextAlign.Center
-                )
+                AuthHeader(isLoginMode = state.isLoginMode)
 
                 Spacer(modifier = Modifier.height(20.dp))
+
+                // Sesiune salvata cu amprenta activata -> card de deblocare
+                AnimatedVisibility(visible = sessionLocked && state.isLoginMode) {
+                    BiometricUnlockCard(
+                        status = biometricStatus,
+                        statusIsError = biometricStatusIsError,
+                        onUnlock = { launchNativeBiometricPrompt() }
+                    )
+                }
 
                 TabRow(
                     selectedTabIndex = if (state.isLoginMode) 0 else 1,
@@ -225,83 +233,72 @@ fun LoginScreen(
                     Tab(
                         selected = state.isLoginMode,
                         onClick = { if (!state.isLoginMode) viewModel.toggleAuthMode() },
-                        text = { Text("Autentificare", fontWeight = FontWeight.SemiBold) }
+                        enabled = !state.isAuthenticating,
+                        text = { Text(stringResource(R.string.auth_tab_login), fontWeight = FontWeight.SemiBold) }
                     )
                     Tab(
                         selected = !state.isLoginMode,
                         onClick = { if (state.isLoginMode) viewModel.toggleAuthMode() },
-                        text = { Text("Înregistrare", fontWeight = FontWeight.SemiBold) }
+                        enabled = !state.isAuthenticating,
+                        text = { Text(stringResource(R.string.auth_tab_register), fontWeight = FontWeight.SemiBold) }
                     )
                 }
 
                 Spacer(modifier = Modifier.height(16.dp))
 
                 AnimatedVisibility(visible = state.generalErrorMessage != null) {
-                    Card(
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(bottom = 12.dp)
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(12.dp),
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ErrorOutline,
-                                contentDescription = "Eroare",
-                                tint = MaterialTheme.colorScheme.error
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = state.generalErrorMessage ?: "",
-                                color = MaterialTheme.colorScheme.onErrorContainer,
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                    }
+                    ErrorBanner(message = state.generalErrorMessage ?: "")
                 }
 
                 OutlinedTextField(
                     value = state.email,
                     onValueChange = viewModel::onEmailChanged,
-                    label = { Text("Adresă de e-mail") },
+                    label = { Text(stringResource(R.string.auth_email_label)) },
+                    placeholder = { Text(stringResource(R.string.auth_email_placeholder)) },
                     leadingIcon = { Icon(Icons.Default.Email, contentDescription = null) },
                     isError = state.emailError != null,
-                    supportingText = {
-                        state.emailError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                    },
+                    supportingText = { state.emailError?.let { FieldError(it) } },
                     singleLine = true,
+                    enabled = !state.isAuthenticating,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Email,
                         imeAction = ImeAction.Next
                     ),
                     keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .focusRequester(emailFocus),
                     shape = RoundedCornerShape(12.dp)
                 )
 
-                Spacer(modifier = Modifier.height(6.dp))
+                Spacer(modifier = Modifier.height(4.dp))
 
                 OutlinedTextField(
                     value = state.password,
                     onValueChange = viewModel::onPasswordChanged,
-                    label = { Text("Parolă") },
+                    label = { Text(stringResource(R.string.auth_password_label)) },
                     leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                     trailingIcon = {
                         IconButton(onClick = { passwordVisible = !passwordVisible }) {
                             Icon(
                                 imageVector = if (passwordVisible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
-                                contentDescription = if (passwordVisible) "Ascunde parola" else "Arată parola"
+                                contentDescription = stringResource(
+                                    if (passwordVisible) R.string.auth_hide_password else R.string.auth_show_password
+                                )
                             )
                         }
                     },
                     visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                     isError = state.passwordError != null,
                     supportingText = {
-                        state.passwordError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                        val error = state.passwordError
+                        when {
+                            error != null -> FieldError(error)
+                            !state.isLoginMode -> Text(stringResource(R.string.auth_password_hint))
+                        }
                     },
                     singleLine = true,
+                    enabled = !state.isAuthenticating,
                     keyboardOptions = KeyboardOptions(
                         keyboardType = KeyboardType.Password,
                         imeAction = if (state.isLoginMode) ImeAction.Done else ImeAction.Next
@@ -319,18 +316,17 @@ fun LoginScreen(
 
                 AnimatedVisibility(visible = !state.isLoginMode) {
                     Column {
-                        Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
                         OutlinedTextField(
                             value = state.confirmPassword,
                             onValueChange = viewModel::onConfirmPasswordChanged,
-                            label = { Text("Confirmă parola") },
+                            label = { Text(stringResource(R.string.auth_confirm_password_label)) },
                             leadingIcon = { Icon(Icons.Default.LockReset, contentDescription = null) },
-                            visualTransformation = PasswordVisualTransformation(),
+                            visualTransformation = if (passwordVisible) VisualTransformation.None else PasswordVisualTransformation(),
                             isError = state.confirmPasswordError != null,
-                            supportingText = {
-                                state.confirmPasswordError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
-                            },
+                            supportingText = { state.confirmPasswordError?.let { FieldError(it) } },
                             singleLine = true,
+                            enabled = !state.isAuthenticating,
                             keyboardOptions = KeyboardOptions(
                                 keyboardType = KeyboardType.Password,
                                 imeAction = ImeAction.Done
@@ -347,143 +343,82 @@ fun LoginScreen(
                     }
                 }
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Button(
-                        onClick = {
+                // Butonul principal (call to action) — Material 3 filled button
+                Button(
+                    onClick = {
+                        if (!state.isAuthenticating) {
                             focusManager.clearFocus()
                             viewModel.submitEmailAuth(onSessionUnlocked, onEnterWithoutSession)
-                        },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(50.dp),
-                        shape = RoundedCornerShape(12.dp),
-                        enabled = !state.isAuthenticating
-                    ) {
-                        if (state.isAuthenticating) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(24.dp),
-                                color = MaterialTheme.colorScheme.onPrimary,
-                                strokeWidth = 2.dp
-                            )
-                        } else {
-                            Text(
-                                text = if (state.isLoginMode) "Conectare" else "Înregistrează-te",
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Bold
-                            )
                         }
-                    }
-
-                    if (state.isLoginMode) {
-                        Spacer(modifier = Modifier.width(10.dp))
-                        FilledTonalIconButton(
-                            onClick = { launchNativeBiometricPrompt() },
-                            modifier = Modifier.size(50.dp),
-                            shape = RoundedCornerShape(12.dp),
-                            colors = IconButtonDefaults.filledTonalIconButtonColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer
-                            )
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Fingerprint,
-                                contentDescription = "Autentificare biometrică",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(28.dp)
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(20.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(ButtonHeight),
+                    // butonul aflat in incarcare ramane in culorile normale (contrast bun)
+                    enabled = !state.isAuthenticating || state.activeMethod == AuthMethod.EMAIL
                 ) {
-                    HorizontalDivider(modifier = Modifier.weight(1f))
-                    Text(
-                        text = " SAU ",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.outline,
-                        modifier = Modifier.padding(horizontal = 8.dp)
-                    )
-                    HorizontalDivider(modifier = Modifier.weight(1f))
+                    if (state.activeMethod == AuthMethod.EMAIL) {
+                        ButtonSpinner(color = MaterialTheme.colorScheme.onPrimary)
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Text(stringResource(R.string.auth_loading_email), fontSize = 16.sp)
+                    } else {
+                        Text(
+                            text = stringResource(
+                                if (state.isLoginMode) R.string.auth_submit_login else R.string.auth_submit_register
+                            ),
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
                 }
 
+                Spacer(modifier = Modifier.height(24.dp))
+                OrDivider()
                 Spacer(modifier = Modifier.height(16.dp))
 
-                OutlinedButton(
-                    onClick = { viewModel.signInWithProvider("Google", onEnterWithoutSession) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant),
-                    colors = ButtonDefaults.outlinedButtonColors(containerColor = MaterialTheme.colorScheme.surface)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.AccountCircle,
-                        contentDescription = "Google",
-                        tint = Color(0xFF4285F4),
-                        modifier = Modifier.size(20.dp)
-                    )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Continuă cu Google",
-                        color = MaterialTheme.colorScheme.onSurface,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                GoogleSignInButton(
+                    loading = state.activeMethod == AuthMethod.GOOGLE,
+                    enabled = !state.isAuthenticating,
+                    onClick = { viewModel.signInWithProvider(AuthMethod.GOOGLE, onEnterWithoutSession) }
+                )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                Button(
-                    onClick = { viewModel.signInWithProvider("Apple", onEnterWithoutSession) },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(48.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = Color.Black,
-                        contentColor = Color.White
-                    )
-                ) {
-                    Text(
-                        text = "  Continuă cu Apple",
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Medium
-                    )
-                }
+                AppleSignInButton(
+                    loading = state.activeMethod == AuthMethod.APPLE,
+                    enabled = !state.isAuthenticating,
+                    onClick = { viewModel.signInWithProvider(AuthMethod.APPLE, onEnterWithoutSession) }
+                )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(8.dp))
 
                 TextButton(
-                    onClick = { viewModel.signInAnonymously(onEnterWithoutSession) },
-                    modifier = Modifier.fillMaxWidth()
+                    onClick = { if (!state.isAuthenticating) viewModel.signInAnonymously(onEnterWithoutSession) },
+                    enabled = !state.isAuthenticating || state.activeMethod == AuthMethod.ANONYMOUS,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = ButtonHeight)
                 ) {
-                    Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
-                    Spacer(modifier = Modifier.width(6.dp))
-                    Text(
-                        text = "Explorează ca vizitator anonim",
-                        fontWeight = FontWeight.Normal
-                    )
-                }
-            }
-
-            if (state.isAuthenticating) {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color.Black.copy(alpha = 0.2f)
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
+                    if (state.activeMethod == AuthMethod.ANONYMOUS) {
+                        ButtonSpinner(color = MaterialTheme.colorScheme.primary)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.auth_loading_provider))
+                    } else {
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(stringResource(R.string.auth_anonymous))
                     }
                 }
+
+                Text(
+                    text = stringResource(R.string.auth_provider_note),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
             }
         }
     }
@@ -491,7 +426,11 @@ fun LoginScreen(
     // La redeschiderea aplicatiei (sesiune salvata + amprenta activata) se ridica automat
     // sheet-ul nativ de amprenta.
     LaunchedEffect(sessionLocked) {
-        if (sessionLocked) launchNativeBiometricPrompt()
+        if (sessionLocked) {
+            launchNativeBiometricPrompt()
+        } else {
+            biometricStatus = null
+        }
     }
 
     if (state.showBiometricOnboardingPrompt) {
@@ -505,13 +444,13 @@ fun LoginScreen(
                     modifier = Modifier.size(48.dp)
                 )
             },
-            title = { Text("Activează autentificarea biometrică") },
+            title = { Text(stringResource(R.string.bio_onboarding_title), textAlign = TextAlign.Center) },
             text = {
                 Text(
-                    if (state.biometricNeedsEnrollment)
-                        "Pe acest telefon nu este înregistrată nicio amprentă. Adaugă una acum, iar data viitoare îți vei putea debloca sesiunea doar cu amprenta."
-                    else
-                        "Doriți să vă conectați mai rapid și în siguranță data viitoare folosind amprenta?"
+                    stringResource(
+                        if (state.biometricNeedsEnrollment) R.string.bio_onboarding_enroll_body
+                        else R.string.bio_onboarding_body
+                    )
                 )
             },
             confirmButton = {
@@ -526,14 +465,261 @@ fun LoginScreen(
                         viewModel.setBiometricsEnabled(true, onSessionUnlocked)
                     }
                 }) {
-                    Text(if (state.biometricNeedsEnrollment) "Adaugă amprenta" else "Activează")
+                    Text(
+                        stringResource(
+                            if (state.biometricNeedsEnrollment) R.string.bio_onboarding_enroll
+                            else R.string.bio_onboarding_enable
+                        )
+                    )
                 }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.setBiometricsEnabled(false, onSessionUnlocked) }) {
-                    Text("Nu acum")
+                    Text(stringResource(R.string.bio_onboarding_later))
                 }
             }
+        )
+    }
+}
+
+@Composable
+private fun AuthHeader(isLoginMode: Boolean) {
+    Icon(
+        imageVector = Icons.Default.Place,
+        contentDescription = stringResource(R.string.auth_logo_description),
+        tint = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.size(64.dp)
+    )
+    Spacer(modifier = Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.auth_brand),
+        style = MaterialTheme.typography.headlineLarge,
+        fontWeight = FontWeight.Bold,
+        color = MaterialTheme.colorScheme.primary,
+        modifier = Modifier.semantics { heading() }
+    )
+    Spacer(modifier = Modifier.height(4.dp))
+    Text(
+        text = stringResource(if (isLoginMode) R.string.auth_subtitle_login else R.string.auth_subtitle_register),
+        style = MaterialTheme.typography.bodyLarge,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+        textAlign = TextAlign.Center
+    )
+}
+
+/** Cardul afisat cand exista o sesiune blocata: buton de amprenta + starea ultimei incercari. */
+@Composable
+private fun BiometricUnlockCard(
+    status: String?,
+    statusIsError: Boolean,
+    onUnlock: () -> Unit
+) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 16.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    imageVector = Icons.Default.Fingerprint,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size(32.dp)
+                )
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = stringResource(R.string.bio_locked_title),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.semantics { heading() }
+                    )
+                    Text(
+                        text = stringResource(R.string.bio_locked_body),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer
+                    )
+                }
+            }
+            if (status != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(
+                    text = status,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium,
+                    color = if (statusIsError) MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                )
+            }
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                onClick = onUnlock,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(ButtonHeight)
+            ) {
+                Icon(Icons.Default.Fingerprint, contentDescription = null)
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(stringResource(R.string.bio_unlock_button), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+@Composable
+private fun ErrorBanner(message: String) {
+    Card(
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 12.dp)
+            // TalkBack anunta eroarea imediat ce apare
+            .semantics { liveRegion = LiveRegionMode.Assertive }
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = Icons.Default.ErrorOutline,
+                contentDescription = stringResource(R.string.auth_error_icon),
+                tint = MaterialTheme.colorScheme.onErrorContainer
+            )
+            Spacer(modifier = Modifier.width(8.dp))
+            Text(
+                text = message,
+                color = MaterialTheme.colorScheme.onErrorContainer,
+                style = MaterialTheme.typography.bodyMedium
+            )
+        }
+    }
+}
+
+/** Mesajul de sub un camp invalid, anuntat de TalkBack cand se schimba. */
+@Composable
+private fun FieldError(message: String) {
+    Text(
+        text = message,
+        color = MaterialTheme.colorScheme.error,
+        modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+    )
+}
+
+@Composable
+private fun OrDivider() {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+        Text(
+            text = stringResource(R.string.auth_or),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(horizontal = 12.dp)
+        )
+        HorizontalDivider(modifier = Modifier.weight(1f), color = MaterialTheme.colorScheme.outlineVariant)
+    }
+}
+
+@Composable
+private fun ButtonSpinner(color: Color) {
+    CircularProgressIndicator(
+        modifier = Modifier.size(20.dp),
+        color = color,
+        strokeWidth = 2.dp
+    )
+}
+
+/**
+ * Butonul "Continuați cu Google", dupa Google Identity branding guidelines:
+ * logo-ul "G" oficial (necolorat peste), fundal alb #FFFFFF cu bordura #747775 si text #1F1F1F
+ * in tema luminoasa; fundal #131314, bordura #8E918F, text #E3E3E3 in tema intunecata;
+ * font Roboto Medium, forma "pill".
+ */
+@Composable
+private fun GoogleSignInButton(loading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val container = if (dark) Color(0xFF131314) else Color(0xFFFFFFFF)
+    val border = if (dark) Color(0xFF8E918F) else Color(0xFF747775)
+    val content = if (dark) Color(0xFFE3E3E3) else Color(0xFF1F1F1F)
+
+    OutlinedButton(
+        onClick = { if (!loading) onClick() },
+        enabled = enabled || loading,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ButtonHeight),
+        border = BorderStroke(1.dp, border),
+        colors = ButtonDefaults.outlinedButtonColors(
+            containerColor = container,
+            contentColor = content,
+            disabledContainerColor = container.copy(alpha = 0.38f),
+            disabledContentColor = content.copy(alpha = 0.38f)
+        ),
+        contentPadding = PaddingValues(horizontal = 12.dp)
+    ) {
+        if (loading) {
+            ButtonSpinner(color = content)
+        } else {
+            // Logo-ul oficial, multicolor: Image (nu Icon), ca sa nu fie recolorat
+            Image(
+                painter = painterResource(R.drawable.ic_google_logo),
+                contentDescription = null,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(10.dp))
+        Text(
+            text = stringResource(if (loading) R.string.auth_loading_provider else R.string.auth_google),
+            fontSize = 14.sp,
+            fontWeight = FontWeight.Medium
+        )
+    }
+}
+
+/**
+ * Butonul "Continuați cu Apple", dupa Apple Human Interface Guidelines (Sign in with Apple):
+ * stilul negru cu logo si text alb in tema luminoasa, stilul alb cu logo si text negru in tema
+ * intunecata; logo-ul Apple oficial, la aceeasi inaltime cu textul.
+ */
+@Composable
+private fun AppleSignInButton(loading: Boolean, enabled: Boolean, onClick: () -> Unit) {
+    val dark = isSystemInDarkTheme()
+    val container = if (dark) Color.White else Color.Black
+    val content = if (dark) Color.Black else Color.White
+
+    Button(
+        onClick = { if (!loading) onClick() },
+        enabled = enabled || loading,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(ButtonHeight),
+        colors = ButtonDefaults.buttonColors(
+            containerColor = container,
+            contentColor = content,
+            disabledContainerColor = container.copy(alpha = 0.38f),
+            disabledContentColor = content.copy(alpha = 0.38f)
+        )
+    ) {
+        if (loading) {
+            ButtonSpinner(color = content)
+        } else {
+            Icon(
+                painter = painterResource(R.drawable.ic_apple_logo),
+                contentDescription = null,
+                tint = content,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = stringResource(if (loading) R.string.auth_loading_provider else R.string.auth_apple),
+            fontSize = 16.sp,
+            fontWeight = FontWeight.Medium
         )
     }
 }
