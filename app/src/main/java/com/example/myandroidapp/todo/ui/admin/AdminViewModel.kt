@@ -15,8 +15,10 @@ import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.UserRole
 import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.todo.data.PostRepository
+import com.example.myandroidapp.todo.data.local.ReportEntity
 import com.example.myandroidapp.todo.data.local.ReportedPost
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -35,6 +37,10 @@ class AdminViewModel(
 
     val reportedPosts: Flow<List<ReportedPost>> = postRepository.reportedPosts()
     val users: Flow<List<UserEntity>> = userRepository.observeAllUsers()
+
+    /** Raportarile in asteptare, grupate pe postare: cine a raportat, motivul si cand. */
+    val pendingReportsByPost: Flow<Map<String, List<ReportEntity>>> =
+        postRepository.pendingReports().map { reports -> reports.groupBy { it.postId } }
     val currentUser: StateFlow<UserEntity?> = userRepository.currentUser
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
@@ -64,13 +70,21 @@ class AdminViewModel(
         }
     }
 
-    /** Da dreptate raportarilor: postarea e eliminata, iar cei care au raportat vad mesajul adminului. */
-    fun deleteReportedPost(reported: ReportedPost, reply: String) = runAdmin("Postarea a fost eliminată, iar raportările au primit răspuns.") {
-        val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
-        val text = reply.trim().ifBlank { DEFAULT_RESOLVED_REPLY }
-        postRepository.resolveReportsByDeleting(reported.post.id, admin.email, text)
-        null
-    }
+    /**
+     * Da dreptate raportarilor: postarea e eliminata, cei care au raportat vad [reply],
+     * iar autorul postarii primeste [authorMessage].
+     */
+    fun deleteReportedPost(reported: ReportedPost, reply: String, authorMessage: String) =
+        runAdmin("Postarea a fost eliminată. Autorul și cei care au raportat au primit mesajul.") {
+            val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
+            postRepository.resolveReportsByDeleting(
+                postId = reported.post.id,
+                adminId = admin.email,
+                reply = reply.trim().ifBlank { DEFAULT_RESOLVED_REPLY },
+                authorMessage = authorMessage.trim().ifBlank { DEFAULT_AUTHOR_MESSAGE }
+            )
+            null
+        }
 
     /** Respinge raportarile: postarea ramane, iar cei care au raportat vad mesajul adminului. */
     fun dismissReports(reported: ReportedPost, reply: String) = runAdmin("Raportările au fost respinse.") {
@@ -95,6 +109,8 @@ class AdminViewModel(
     companion object {
         const val DEFAULT_RESOLVED_REPLY = "Mulțumim! Postarea încălca regulile și a fost eliminată."
         const val DEFAULT_REJECTED_REPLY = "Am verificat postarea și nu încalcă regulile comunității."
+        const val DEFAULT_AUTHOR_MESSAGE =
+            "Postarea ta a fost ștearsă de un administrator deoarece a fost raportată și încălca regulile comunității."
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

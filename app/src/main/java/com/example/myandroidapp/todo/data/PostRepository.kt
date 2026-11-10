@@ -12,6 +12,7 @@ import com.example.myapp.todo.data.local.ItemDao
 import com.example.myandroidapp.core.security.SecureStore
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
+import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
 import com.example.myandroidapp.todo.data.local.HiddenPostEntity
 import com.example.myandroidapp.todo.data.local.ModerationDao
 import com.example.myandroidapp.todo.data.local.ReportEntity
@@ -84,8 +85,41 @@ class PostRepository(
         )
     }
 
-    /** Adminul da dreptate raportarilor: postarea e eliminata, iar cei care au raportat primesc mesajul. */
-    suspend fun resolveReportsByDeleting(postId: String, adminId: String, reply: String) {
+    /** Admin: fiecare raportare in asteptare (cine a raportat, motivul, cand). */
+    fun pendingReports(): Flow<List<ReportEntity>> = moderationDao.observePendingReports()
+
+    /** Mesajele necitite pentru autorul cu acest ownerKey (postari sterse de admin). */
+    fun unreadNoticesFor(ownerKey: String): Flow<List<AuthorNoticeEntity>> =
+        moderationDao.observeUnreadNotices(ownerKey)
+
+    suspend fun markNoticesRead(ownerKey: String) = moderationDao.markNoticesRead(ownerKey)
+
+    /**
+     * Salveaza mesajul pentru autorul unei postari sterse de admin. Se apeleaza INAINTE de
+     * stergere, cat timp postarea (textul, autorul) si raportarile ei inca exista.
+     */
+    suspend fun notifyAuthorOfRemoval(postId: String, adminId: String, message: String) {
+        val post = itemDao.findById(postId) ?: return
+        if (post.user_id.isBlank()) return
+        val reasons = moderationDao.pendingReasons(postId).distinct().joinToString(" • ")
+        moderationDao.insertNotice(
+            AuthorNoticeEntity(
+                recipientKey = post.user_id,
+                postId = postId,
+                postSnippet = post.description.take(140),
+                reasons = reasons,
+                message = message,
+                adminId = adminId
+            )
+        )
+    }
+
+    /**
+     * Adminul da dreptate raportarilor: postarea e eliminata, cei care au raportat primesc
+     * raspunsul [reply], iar autorul postarii primeste mesajul [authorMessage].
+     */
+    suspend fun resolveReportsByDeleting(postId: String, adminId: String, reply: String, authorMessage: String) {
+        notifyAuthorOfRemoval(postId, adminId, authorMessage)
         moderationDao.answerReports(
             postId = postId,
             status = ReportStatus.RESOLVED,

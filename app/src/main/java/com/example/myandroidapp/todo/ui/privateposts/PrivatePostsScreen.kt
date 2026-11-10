@@ -64,7 +64,9 @@ import com.example.myandroidapp.todo.ui.posts.PostList
 @Composable
 fun PrivatePostsScreen(
     onBack: () -> Unit,
-    onAddPrivatePost: () -> Unit
+    onAddPrivatePost: () -> Unit,
+    // adminul nu publica postari (nici private)
+    canAddPost: Boolean = true
 ) {
     val viewModel = viewModel<PrivatePostsViewModel>(factory = PrivatePostsViewModel.Factory)
     val posts by viewModel.privatePosts.collectAsStateWithLifecycle(initialValue = emptyList())
@@ -81,7 +83,7 @@ fun PrivatePostsScreen(
             )
         },
         floatingActionButton = {
-            if (viewModel.unlocked) {
+            if (viewModel.unlocked && canAddPost) {
                 FloatingActionButton(onClick = onAddPrivatePost) {
                     Icon(Icons.Default.Add, contentDescription = "Adaugă postare privată")
                 }
@@ -97,7 +99,8 @@ fun PrivatePostsScreen(
                 PrivateLockContent(viewModel)
             } else if (posts.isEmpty()) {
                 Text(
-                    text = "Nu ai încă postări private.\nApasă + ca să adaugi una.",
+                    text = if (canAddPost) "Nu ai încă postări private.\nApasă + ca să adaugi una."
+                    else "Nu ai postări private.",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center)

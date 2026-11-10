@@ -50,6 +50,27 @@ data class HiddenPostEntity(
     val createdAt: Long = System.currentTimeMillis()
 )
 
+/**
+ * Mesaj pentru autorul unei postari sterse de un administrator (ex. dupa raportari).
+ * Autorul il vede la urmatoarea intrare in aplicatie, pana apasa "Am înțeles".
+ */
+@Entity(tableName = "author_notices")
+data class AuthorNoticeEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    // ownerKey-ul autorului (user_id de pe postare)
+    val recipientKey: String,
+    val postId: String,
+    // textul postarii sterse (postarea nu mai exista dupa stergere)
+    val postSnippet: String,
+    // motivele raportarilor (gol daca adminul a sters-o direct, fara raportari)
+    val reasons: String,
+    // mesajul scris de admin pentru autor
+    val message: String,
+    val adminId: String,
+    val createdAt: Long = System.currentTimeMillis(),
+    val isRead: Boolean = false
+)
+
 /** O postare cu raportari in asteptare, cu numarul lor si motivele (pentru admin). */
 data class ReportedPost(
     @Embedded val post: Post,
@@ -88,4 +109,23 @@ interface ModerationDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun hide(hidden: HiddenPostEntity)
+
+    // Admin: fiecare raportare in asteptare (cine a raportat, motivul, cand)
+    @Query("SELECT * FROM reports WHERE status = 'PENDING' ORDER BY createdAt DESC")
+    fun observePendingReports(): Flow<List<ReportEntity>>
+
+    // Motivele raportarilor in asteptare ale unei postari (pentru mesajul catre autor)
+    @Query("SELECT reason FROM reports WHERE postId = :postId AND status = 'PENDING'")
+    suspend fun pendingReasons(postId: String): List<String>
+
+    // ---------- Mesaje pentru autorii postarilor sterse ----------
+
+    @Insert
+    suspend fun insertNotice(notice: AuthorNoticeEntity)
+
+    @Query("SELECT * FROM author_notices WHERE recipientKey = :recipientKey AND isRead = 0 ORDER BY createdAt DESC")
+    fun observeUnreadNotices(recipientKey: String): Flow<List<AuthorNoticeEntity>>
+
+    @Query("UPDATE author_notices SET isRead = 1 WHERE recipientKey = :recipientKey")
+    suspend fun markNoticesRead(recipientKey: String)
 }

@@ -13,6 +13,8 @@ import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
+import com.example.myandroidapp.todo.ui.admin.AdminViewModel
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
@@ -46,6 +48,23 @@ class PostsViewModel(
         .flatMapLatest { user -> if (user == null) flowOf(emptyList()) else postRepository.reportedBy(user.email) }
         .map { it.toSet() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** Mesajele necitite pentru utilizatorul curent: postari ale lui sterse de un administrator. */
+    @OptIn(ExperimentalCoroutinesApi::class)
+    val unreadNotices: StateFlow<List<AuthorNoticeEntity>> = roleRepository.currentUser
+        .flatMapLatest { user ->
+            if (user == null || user.isAdmin) flowOf(emptyList())
+            else postRepository.unreadNoticesFor(user.ownerKey)
+        }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Utilizatorul a citit mesajele ("Am înțeles"). */
+    fun acknowledgeNotices() {
+        viewModelScope.launch {
+            val user = roleRepository.currentUserOnce() ?: return@launch
+            postRepository.markNoticesRead(user.ownerKey)
+        }
+    }
 
     var isRefreshing by mutableStateOf(false)
         private set
@@ -93,6 +112,10 @@ class PostsViewModel(
                 return@launch
             }
             try {
+                // Adminul sterge postarea altcuiva -> autorul primeste un mesaj
+                if (user.isAdmin && post.user_id != user.ownerKey) {
+                    postRepository.notifyAuthorOfRemoval(post.id, user.email, AdminViewModel.DEFAULT_AUTHOR_MESSAGE)
+                }
                 postRepository.deletePost(post.id, user.email)
                 message = "Postarea a fost ștearsă."
             } catch (e: Exception) {

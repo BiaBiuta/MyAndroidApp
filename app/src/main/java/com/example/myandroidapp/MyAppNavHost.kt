@@ -145,25 +145,35 @@ fun MyAppNavHost() {
                 LaunchedEffect(Unit) { navController.popBackStack() }
             }
         }
+        // Adaugarea de postari: doar utilizatorii (si vizitatorii), NU adminul — el doar modereaza
         composable(route = "$postsRoute-new")
         {
-            PostAddScreen(
-                onClose = { onClose() }
-            )
+            if (currentUser?.isAdmin == true) {
+                AdminCannotPost { navController.popBackStack() }
+            } else {
+                PostAddScreen(
+                    onClose = { onClose() }
+                )
+            }
         }
         // Adaugare din sectiunea privata: comutatorul "Postare privată" e pornit implicit
         composable(route = "$postsRoute-new-private")
         {
-            PostAddScreen(
-                onClose = { onClose() },
-                isPrivateInitially = true
-            )
+            if (currentUser?.isAdmin == true) {
+                AdminCannotPost { navController.popBackStack() }
+            } else {
+                PostAddScreen(
+                    onClose = { onClose() },
+                    isPrivateInitially = true
+                )
+            }
         }
         composable(route = privateRoute)
         {
             PrivatePostsScreen(
                 onBack = { navController.popBackStack() },
-                onAddPrivatePost = { navController.navigate("$postsRoute-new-private") }
+                onAddPrivatePost = { navController.navigate("$postsRoute-new-private") },
+                canAddPost = currentUser?.isAdmin != true
             )
         }
         composable(route = authRoute)
@@ -219,5 +229,15 @@ fun MyAppNavHost() {
                 navController.navigate(authRoute) { popUpTo(0) }
             }
         }
+    }
+}
+
+/** Adminul a ajuns pe ecranul de adaugare (ex. link vechi) -> mesaj si inapoi. */
+@Composable
+private fun AdminCannotPost(onBack: () -> Unit) {
+    val context = LocalContext.current
+    LaunchedEffect(Unit) {
+        Toast.makeText(context, "Administratorii nu pot publica postări.", Toast.LENGTH_SHORT).show()
+        onBack()
     }
 }

@@ -13,6 +13,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.example.myandroidapp.auth.data.local.UserDao
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.todo.data.Post
+import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
 import com.example.myandroidapp.todo.data.local.HiddenPostEntity
 import com.example.myandroidapp.todo.data.local.ModerationDao
 import com.example.myandroidapp.todo.data.local.ReportEntity
@@ -23,9 +24,10 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 5: utilizatori + roluri (users), raportari (reports), postari sterse (hidden_posts)
 // version 6: credentialele (hash-ul parolei) in tabela users
 // version 7: raspunsul adminului la raportari (status, mesaj)
+// version 8: mesajele pentru autorii postarilor sterse de admin (author_notices)
 @Database(
-    entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class],
-    version = 7
+    entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class],
+    version = 8
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -95,13 +97,25 @@ abstract class MyAppDatabase : RoomDatabase() {
             override fun migrate(db: SupportSQLiteDatabase) = addReportAnswerColumns(db)
         }
 
+        // 7 -> 8: tabela cu mesajele pentru autori; restul datelor raman neatinse
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `author_notices` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                            "`recipientKey` TEXT NOT NULL, `postId` TEXT NOT NULL, `postSnippet` TEXT NOT NULL, " +
+                            "`reasons` TEXT NOT NULL, `message` TEXT NOT NULL, `adminId` TEXT NOT NULL, " +
+                            "`createdAt` INTEGER NOT NULL, `isRead` INTEGER NOT NULL)"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): MyAppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance

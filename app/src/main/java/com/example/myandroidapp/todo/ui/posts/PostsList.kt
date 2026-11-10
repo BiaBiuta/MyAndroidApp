@@ -108,40 +108,7 @@ fun PostComponent(
             Spacer(modifier = Modifier.height(8.dp))
 
             // Optional Post Image
-            dep.photo?.let { photoUrl ->
-                // Verificăm dacă stringul este în format Base64
-                val base64Data = photoUrl.substringAfter("base64,", "")
-                if (base64Data.isNotEmpty()) {
-                    // Decodificăm Base64 într-un Bitmap
-                    val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
-                    val bitmap = BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-
-                    // Dacă decodificarea reușește, afișăm imaginea
-                    bitmap?.let {
-                        Image(
-                            bitmap = it.asImageBitmap(),
-                            contentDescription = "Post Image",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(200.dp)
-                                .clip(RoundedCornerShape(8.dp)),
-                            contentScale = ContentScale.Crop
-                        )
-                    }
-                } else {
-                    // Dacă nu este Base64, folosim `rememberImagePainter` pentru alte tipuri de URL-uri
-                    Image(
-                        painter = rememberImagePainter(data = photoUrl),
-                        contentDescription = "Post Image",
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(200.dp)
-                            .clip(RoundedCornerShape(8.dp)),
-                        contentScale = ContentScale.Crop
-                    )
-                }
-            }
-
+            PostPhoto(photo = dep.photo)
 
             Spacer(modifier = Modifier.height(8.dp))
 
@@ -166,6 +133,43 @@ fun PostComponent(
     }
 }
 
+
+/**
+ * Poza unei postari: Base64 ("data:image/...;base64,...") sau URL / cale de fisier.
+ * Folosita in lista principala si in panoul de administrare (postarile raportate).
+ */
+@Composable
+fun PostPhoto(photo: String?, modifier: Modifier = Modifier) {
+    if (photo.isNullOrBlank()) return
+    val imageModifier = modifier
+        .fillMaxWidth()
+        .height(200.dp)
+        .clip(RoundedCornerShape(8.dp))
+    val base64Data = photo.substringAfter("base64,", "")
+    if (base64Data.isNotEmpty()) {
+        val bitmap = try {
+            val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
+            BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+        } catch (e: IllegalArgumentException) {
+            null
+        }
+        bitmap?.let {
+            Image(
+                bitmap = it.asImageBitmap(),
+                contentDescription = "Poza postării",
+                modifier = imageModifier,
+                contentScale = ContentScale.Crop
+            )
+        }
+    } else {
+        Image(
+            painter = rememberImagePainter(data = photo),
+            contentDescription = "Poza postării",
+            modifier = imageModifier,
+            contentScale = ContentScale.Crop
+        )
+    }
+}
 
 @Composable
 fun PostDetail(post: Post, onPostClick: (id: String) -> Unit) {

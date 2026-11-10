@@ -17,6 +17,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.ui.Modifier
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.material.icons.Icons
@@ -82,6 +85,7 @@ fun PostsScreen(
     val itemsUiState by itemsViewModel.uiState.collectAsStateWithLifecycle(initialValue = listOf())
     val currentUser by itemsViewModel.currentUser.collectAsStateWithLifecycle()
     val reportedByMe by itemsViewModel.reportedByMe.collectAsStateWithLifecycle()
+    val unreadNotices by itemsViewModel.unreadNotices.collectAsStateWithLifecycle()
     var postToReport by remember { mutableStateOf<Post?>(null) }
     var postToDelete by remember { mutableStateOf<Post?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -156,14 +160,17 @@ fun PostsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            MyFloatingActionButton(
-                isEditing = isEditing,
-                onClick = {
-                    coroutineScope.launch {
-                        isEditing = true
+            // Adminul doar modereaza: nu poate publica postari (vizitatorii si utilizatorii pot)
+            if (currentUser?.isAdmin != true) {
+                MyFloatingActionButton(
+                    isEditing = isEditing,
+                    onClick = {
+                        coroutineScope.launch {
+                            isEditing = true
+                        }
                     }
-                }
-            )
+                )
+            }
         }
     ) { paddingValues ->
         Column(
@@ -230,6 +237,48 @@ fun PostsScreen(
             },
             dismissButton = {
                 TextButton(onClick = { postToDelete = null }) { Text("Anulează") }
+            }
+        )
+    }
+
+    // Postari ale utilizatorului sterse de un administrator -> mesajul adminului
+    if (unreadNotices.isNotEmpty()) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = {},
+            icon = { Icon(Icons.Default.Flag, contentDescription = null) },
+            title = {
+                Text(
+                    if (unreadNotices.size == 1) "Un administrator ți-a șters o postare"
+                    else "Un administrator ți-a șters ${unreadNotices.size} postări"
+                )
+            },
+            text = {
+                Column(
+                    modifier = Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    unreadNotices.forEach { notice ->
+                        Column {
+                            Text(
+                                "„${notice.postSnippet.ifBlank { "(postare fără text)" }}”",
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            if (notice.reasons.isNotBlank()) {
+                                Text("Motivul raportării: ${notice.reasons}")
+                            }
+                            Text("Mesajul administratorului: ${notice.message}")
+                            Text(
+                                java.text.DateFormat.getDateTimeInstance(
+                                    java.text.DateFormat.SHORT, java.text.DateFormat.SHORT
+                                ).format(java.util.Date(notice.createdAt)),
+                                style = androidx.compose.material3.MaterialTheme.typography.bodySmall
+                            )
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(onClick = { itemsViewModel.acknowledgeNotices() }) { Text("Am înțeles") }
             }
         )
     }

@@ -20,6 +20,7 @@ import androidx.work.NetworkType
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.example.myandroidapp.MyApplication
+import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
 import kotlinx.coroutines.launch
@@ -81,6 +82,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
 
         viewModelScope.launch {
             Log.d(TAG, "saveOrUpdateItem...");
+            if (isAdmin()) return@launch
             try {
                 uiState = uiState.copy(submitResult = Result.Loading)
                 val createdAt = java.util.Date().toInstant().toString() // Echivalent pentru new Date().toISOString() în JavaScript
@@ -148,6 +150,7 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
     @RequiresApi(Build.VERSION_CODES.O)
     fun savePrivatePost(photo: String, description: String, ownerKey: String, selectedLocation: Location) {
         viewModelScope.launch {
+            if (isAdmin()) return@launch
             try {
                 uiState = uiState.copy(submitResult = Result.Loading)
                 val now = java.util.Date().toInstant().toString()
@@ -169,6 +172,21 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
                 uiState = uiState.copy(submitResult = Result.Error(e))
             }
         }
+    }
+
+    /**
+     * Verificare si la salvare, nu doar in UI: adminul nu poate publica postari.
+     * Intoarce true (si marcheaza eroarea) daca utilizatorul curent e admin.
+     */
+    private suspend fun isAdmin(): Boolean {
+        val user = (application as MyApplication).container.roleRepository.currentUserOnce()
+        if (user?.isAdmin == true) {
+            uiState = uiState.copy(
+                submitResult = Result.Error(IllegalStateException("Administratorii nu pot publica postări."))
+            )
+            return true
+        }
+        return false
     }
 
     companion object {
