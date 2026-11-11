@@ -113,8 +113,10 @@ fun PostsScreen(
                 actions = {
                     Text(
                         text = if (myNetworkStatusViewModel.uiState) "Online" else "Offline",
-                        style = MaterialTheme.typography.body1,
-                        color = if (myNetworkStatusViewModel.uiState) Purple80 else MaterialTheme.colors.error
+                        style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
+                        color = if (myNetworkStatusViewModel.uiState)
+                            androidx.compose.material3.MaterialTheme.colorScheme.primary
+                        else androidx.compose.material3.MaterialTheme.colorScheme.error
                     )
                     // Activare / dezactivare amprenta oricand, nu doar in dialogul de dupa primul login
                     if (showBiometricToggle) {
@@ -374,8 +376,12 @@ fun RoleBar(
     onOpenAdmin: () -> Unit,
     onOpenMyReports: () -> Unit = {}
 ) {
-    Surface(
-        color = if (user?.isAdmin == true) Color(0xFFFFF3E0) else Color(0xFFE8EAF6),
+    // Culori din tema (Material 3): contrast corect atat in tema luminoasa, cat si in cea intunecata
+    androidx.compose.material3.Surface(
+        color = if (user?.isAdmin == true) androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
+        else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
+        contentColor = if (user?.isAdmin == true) androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
+        else androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column {

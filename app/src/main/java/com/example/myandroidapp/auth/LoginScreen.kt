@@ -21,6 +21,7 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Fingerprint
@@ -28,6 +29,7 @@ import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockReset
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Place
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.*
@@ -44,6 +46,7 @@ import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -294,7 +297,8 @@ fun LoginScreen(
                         val error = state.passwordError
                         when {
                             error != null -> FieldError(error)
-                            !state.isLoginMode -> Text(stringResource(R.string.auth_password_hint))
+                            !state.isLoginMode && state.password.isEmpty() ->
+                                Text(stringResource(R.string.auth_password_hint))
                         }
                     },
                     singleLine = true,
@@ -313,6 +317,11 @@ fun LoginScreen(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(12.dp)
                 )
+
+                // Doar la Inregistrare: puterea parolei + lista de reguli, actualizate la fiecare tasta
+                AnimatedVisibility(visible = state.passwordCheck != null) {
+                    state.passwordCheck?.let { PasswordStrengthPanel(it) }
+                }
 
                 AnimatedVisibility(visible = !state.isLoginMode) {
                     Column {
@@ -356,10 +365,19 @@ fun LoginScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(ButtonHeight),
-                    // butonul aflat in incarcare ramane in culorile normale (contrast bun)
-                    enabled = !state.isAuthenticating || state.activeMethod == AuthMethod.EMAIL
+                    // butonul aflat in incarcare ramane in culorile normale (contrast bun);
+                    // dupa prea multe incercari gresite e blocat pana expira timpul
+                    enabled = state.lockoutSecondsLeft == 0 &&
+                            (!state.isAuthenticating || state.activeMethod == AuthMethod.EMAIL)
                 ) {
-                    if (state.activeMethod == AuthMethod.EMAIL) {
+                    if (state.lockoutSecondsLeft > 0) {
+                        Icon(Icons.Default.Lock, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            stringResource(R.string.auth_locked_button, state.lockoutSecondsLeft),
+                            fontSize = 16.sp
+                        )
+                    } else if (state.activeMethod == AuthMethod.EMAIL) {
                         ButtonSpinner(color = MaterialTheme.colorScheme.onPrimary)
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(stringResource(R.string.auth_loading_email), fontSize = 16.sp)
@@ -564,6 +582,76 @@ private fun BiometricUnlockCard(
                 Icon(Icons.Default.Fingerprint, contentDescription = null)
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(stringResource(R.string.bio_unlock_button), fontWeight = FontWeight.SemiBold)
+            }
+        }
+    }
+}
+
+/**
+ * Puterea parolei noi si lista de reguli (Inregistrare). Fiecare regula are iconita SI text
+ * ("Îndeplinit" / "Neîndeplinit" pentru TalkBack), deci starea nu e transmisa doar prin culoare.
+ */
+@Composable
+private fun PasswordStrengthPanel(check: PasswordPolicy.Result) {
+    val strength = check.strength
+    val strengthColor = when (strength) {
+        PasswordPolicy.Strength.WEAK -> MaterialTheme.colorScheme.error
+        PasswordPolicy.Strength.MEDIUM -> MaterialTheme.colorScheme.tertiary
+        PasswordPolicy.Strength.STRONG,
+        PasswordPolicy.Strength.VERY_STRONG -> MaterialTheme.colorScheme.primary
+    }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = 4.dp, end = 4.dp, bottom = 8.dp)
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .semantics(mergeDescendants = true) {
+                    liveRegion = LiveRegionMode.Polite
+                },
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LinearProgressIndicator(
+                progress = { strength.progress },
+                color = strengthColor,
+                trackColor = MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(6.dp)
+                    .clip(RoundedCornerShape(3.dp))
+            )
+            Spacer(modifier = Modifier.width(12.dp))
+            Text(
+                text = stringResource(R.string.auth_password_strength, strength.label),
+                style = MaterialTheme.typography.labelLarge,
+                color = strengthColor
+            )
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        PasswordPolicy.Rule.entries.forEach { rule ->
+            val ok = rule in check.passed
+            val status = stringResource(if (ok) R.string.auth_rule_met else R.string.auth_rule_unmet)
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 2.dp)
+                    .semantics(mergeDescendants = true) { contentDescription = "$status: ${rule.label}" },
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Icon(
+                    imageVector = if (ok) Icons.Default.CheckCircle else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (ok) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text(
+                    text = rule.label,
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (ok) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
         }
     }

@@ -13,7 +13,11 @@
     <string name="auth_email_label">Adresă de e-mail</string>
     <string name="auth_email_placeholder">nume@exemplu.ro</string>
     <string name="auth_password_label">Parolă</string>
-    <string name="auth_password_hint">Minim 6 caractere</string>
+    <string name="auth_password_hint">Minim 12 caractere: litere mari și mici, cifre și simboluri</string>
+    <string name="auth_password_strength">Putere: %1$s</string>
+    <string name="auth_rule_met">Îndeplinit</string>
+    <string name="auth_rule_unmet">Neîndeplinit</string>
+    <string name="auth_locked_button">Încearcă din nou în %1$d s</string>
     <string name="auth_confirm_password_label">Confirmă parola</string>
     <string name="auth_show_password">Arată parola</string>
     <string name="auth_hide_password">Ascunde parola</string>

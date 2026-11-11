@@ -12,6 +12,7 @@ import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -31,6 +32,10 @@ data class LoginUiState(
     val passwordError: String? = null,
     val confirmPassword: String = "",
     val confirmPasswordError: String? = null,
+    // doar la Inregistrare: ce reguli indeplineste parola noua (lista + indicatorul de putere)
+    val passwordCheck: PasswordPolicy.Result? = null,
+    // login blocat temporar dupa prea multe incercari gresite (secunde ramase)
+    val lockoutSecondsLeft: Int = 0,
     val isAuthenticating: Boolean = false,
     val activeMethod: AuthMethod? = null,
     val authenticationError: Throwable? = null,
@@ -49,6 +54,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val userPreferencesRepository = container.userPreferencesRepository
     private val roleRepository = container.roleRepository
     private val biometricChoices = BiometricChoiceStore(application)
+    private val loginThrottle = LoginThrottle(application)
+    private var lockoutJob: Job? = null
 
     // Sesiunea (token + user) primita la login. O salvam abia dupa ce utilizatorul
     // raspunde la dialogul de activare a amprentei, impreuna cu alegerea lui.
@@ -76,30 +83,51 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 generalErrorMessage = null,
                 emailError = null,
                 passwordError = null,
-                confirmPasswordError = null
+                confirmPasswordError = null,
+                // la Inregistrare verificam parola deja scrisa; la Autentificare nu afisam reguli
+                passwordCheck = if (it.isLoginMode && it.password.isNotEmpty())
+                    PasswordPolicy.check(it.password, it.email) else null
             )
         }
     }
 
     fun onEmailChanged(email: String) {
+        val trimmed = email.trim()   // spatiile de la autocompletare nu fac adresa invalida
         val error = when {
-            email.isBlank() -> null
-            !android.util.Patterns.EMAIL_ADDRESS.matcher(email).matches() -> "Format de e-mail invalid"
+            trimmed.isBlank() -> null
+            trimmed.length > 254 -> "Adresa de e-mail este prea lungă"
+            !android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches() -> "Format de e-mail invalid"
             else -> null
         }
-        _uiState.update { it.copy(email = email, emailError = error, generalErrorMessage = null) }
+        _uiState.update {
+            it.copy(
+                email = trimmed,
+                emailError = error,
+                generalErrorMessage = null,
+                // regula "nu contine numele din e-mail" depinde si de adresa
+                passwordCheck = if (!it.isLoginMode && it.password.isNotEmpty())
+                    PasswordPolicy.check(it.password, trimmed) else null
+            )
+        }
     }
 
     fun onPasswordChanged(password: String) {
+        val state = _uiState.value
+        val check = if (!state.isLoginMode && password.isNotEmpty())
+            PasswordPolicy.check(password, state.email) else null
         val error = when {
-            password.isBlank() -> null
-            password.length < 6 -> "Parola trebuie să aibă minim 6 caractere"
+            password.isEmpty() -> null
+            password.length > PasswordPolicy.MAX_LENGTH ->
+                "Parola poate avea cel mult ${PasswordPolicy.MAX_LENGTH} de caractere"
+            // la Inregistrare regulile se vad in timp real in lista de sub camp;
+            // la Autentificare nu aratam regulile (nu ajutam un atacator si nu blocam conturile vechi)
             else -> null
         }
         _uiState.update {
             it.copy(
                 password = password,
                 passwordError = error,
+                passwordCheck = check,
                 confirmPasswordError = if (!it.isLoginMode && it.confirmPassword.isNotEmpty() && it.confirmPassword != password) "Parolele nu coincid" else null,
                 generalErrorMessage = null
             )
@@ -135,10 +163,17 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             "Introduceți adresa de e-mail"
         } else state.emailError
 
-        val passErr = if (state.password.isBlank()) {
-            hasError = true
-            "Introduceți parola"
-        } else state.passwordError
+        val passErr = when {
+            state.password.isBlank() -> {
+                hasError = true
+                "Introduceți parola"
+            }
+            !state.isLoginMode && state.passwordCheck?.isValid != true -> {
+                hasError = true
+                "Parola nu îndeplinește toate cerințele de mai jos"
+            }
+            else -> state.passwordError
+        }
 
         var confirmPassErr = state.confirmPasswordError
         if (!state.isLoginMode && state.confirmPassword.isBlank()) {
@@ -155,6 +190,12 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     generalErrorMessage = "Vă rugăm să corectați erorile din formular."
                 )
             }
+            return
+        }
+
+        // Prea multe incercari gresite pentru acest cont -> login blocat temporar
+        if (state.isLoginMode && loginThrottle.remainingLockMs(state.email) > 0) {
+            startLockoutCountdown(state.email)
             return
         }
 
@@ -177,12 +218,42 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             }
 
             if (session == null) {
+                var message = failureMessage
+                if (state.isLoginMode && failureMessage == INVALID_CREDENTIALS) {
+                    val lockMs = loginThrottle.registerFailure(state.email)
+                    if (lockMs > 0) {
+                        _uiState.update { it.copy(isAuthenticating = false, activeMethod = null, password = "") }
+                        startLockoutCountdown(state.email)
+                        return@launch
+                    }
+                    val left = loginThrottle.attemptsLeft(state.email)
+                    if (left <= 2) {
+                        message = "$INVALID_CREDENTIALS " +
+                                if (left == 1) "Mai ai o singură încercare." else "Mai ai $left încercări."
+                    }
+                }
                 _uiState.update {
-                    it.copy(isAuthenticating = false, activeMethod = null, generalErrorMessage = failureMessage)
+                    it.copy(
+                        isAuthenticating = false,
+                        activeMethod = null,
+                        generalErrorMessage = message,
+                        // parola gresita nu ramane in camp (si nici in memorie)
+                        password = if (it.isLoginMode) "" else it.password
+                    )
                 }
                 return@launch
             }
-            _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
+            if (state.isLoginMode) loginThrottle.registerSuccess(state.email)
+            // dupa login reusit, parola nu mai ramane in starea ecranului
+            _uiState.update {
+                it.copy(
+                    isAuthenticating = false,
+                    activeMethod = null,
+                    password = "",
+                    confirmPassword = "",
+                    passwordCheck = null
+                )
+            }
 
             val previousChoice = biometricChoices.choiceFor(session.email)
             if (biometricHardwarePresent() && previousChoice == null) {
@@ -238,13 +309,15 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         if (error !is java.io.IOException) {
             // Serverul a raspuns, dar a respins datele (ex. 401)
             Log.w(TAG, "login refused by server", error)
-            return null to "E-mail sau parolă incorecte."
+            return null to INVALID_CREDENTIALS
         }
 
         // Serverul nu poate fi contactat -> verificare in baza de date locala
         return when (roleRepository.checkOffline(email, password)) {
             RoleRepository.OfflineCheck.VALID -> {
                 val account = roleRepository.findAccount(email)
+                // inlocuim hash-ul vechi cu unul nou (algoritmul si iteratiile curente)
+                if (account != null) roleRepository.saveCredentials(email, account.ownerKey, passwordHash)
                 UserPreferences(
                     email = email,
                     token = "local-" + java.util.UUID.randomUUID().toString(),
@@ -253,10 +326,11 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                     passwordHash = passwordHash
                 ) to ""
             }
-            RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT ->
-                null to "Nu există niciun cont cu acest e-mail. Creați unul din tab-ul Înregistrare."
+            // Acelasi mesaj pentru cont inexistent si parola gresita: altfel un atacator
+            // ar putea afla ce adrese de e-mail au cont in aplicatie (user enumeration).
+            RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT,
             RoleRepository.OfflineCheck.WRONG_PASSWORD ->
-                null to "Parola este incorectă."
+                null to INVALID_CREDENTIALS
             RoleRepository.OfflineCheck.BLOCKED ->
                 null to RoleRepository.BLOCKED_MESSAGE
         }
@@ -332,5 +406,34 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
             // nu a adaugat nimic -> dialogul ramane, poate incerca din nou sau alege "Nu acum"
             _uiState.update { it.copy(biometricNeedsEnrollment = true) }
         }
+    }
+
+    /**
+     * Login blocat temporar: afisam cate secunde mai sunt si deblocam butonul la final.
+     * Durata vine din [LoginThrottle], deci repornirea aplicatiei nu scurteaza blocarea.
+     */
+    private fun startLockoutCountdown(email: String) {
+        lockoutJob?.cancel()
+        lockoutJob = viewModelScope.launch {
+            var remainingMs = loginThrottle.remainingLockMs(email)
+            while (remainingMs > 0) {
+                val seconds = ((remainingMs + 999) / 1000).toInt()
+                _uiState.update {
+                    it.copy(
+                        lockoutSecondsLeft = seconds,
+                        generalErrorMessage = "Prea multe încercări greșite. Din motive de securitate, " +
+                                "poți încerca din nou peste $seconds s."
+                    )
+                }
+                delay(1000)
+                remainingMs = loginThrottle.remainingLockMs(email)
+            }
+            _uiState.update { it.copy(lockoutSecondsLeft = 0, generalErrorMessage = null) }
+        }
+    }
+
+    companion object {
+        /** Acelasi mesaj pentru cont inexistent si parola gresita (fara user enumeration). */
+        const val INVALID_CREDENTIALS = "E-mail sau parolă incorecte."
     }
 }
