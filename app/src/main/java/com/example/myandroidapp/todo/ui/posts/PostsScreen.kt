@@ -27,10 +27,14 @@ import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Person
 import com.example.myandroidapp.auth.data.local.UserEntity
+import com.example.myandroidapp.auth.data.local.AuthProvider
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.auth.data.local.isGuest
+import com.example.myandroidapp.auth.data.local.isRegularUser
 import com.example.myandroidapp.todo.data.Post
 import androidx.compose.ui.platform.LocalContext
 import androidx.biometric.BiometricManager
@@ -153,8 +157,10 @@ fun PostsScreen(
                             )
                         }
                     }
-                    // Sectiunea privata (cere din nou amprenta sau e-mail + parola)
-                    Button(onClick = onOpenPrivate) { Text("Privat") }
+                    // Sectiunea privata (doar USER; cere din nou amprenta sau parola)
+                    if (currentUser?.isRegularUser == true) {
+                        Button(onClick = onOpenPrivate) { Text("Privat") }
+                    }
                     Spacer(modifier = Modifier.width(4.dp))
                     Button(onClick = onLogout) { Text("Logout") }
                 }
@@ -162,8 +168,8 @@ fun PostsScreen(
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            // Adminul doar modereaza: nu poate publica postari (vizitatorii si utilizatorii pot)
-            if (currentUser?.isAdmin != true) {
+            // Doar USER publica: adminul modereaza, vizitatorul anonim doar citeste
+            if (currentUser?.isRegularUser == true) {
                 MyFloatingActionButton(
                     isEditing = isEditing,
                     onClick = {
@@ -390,16 +396,21 @@ fun RoleBar(
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 Icon(
-                    imageVector = if (user?.isAdmin == true) Icons.Default.AdminPanelSettings else Icons.Default.Person,
+                    imageVector = when {
+                        user?.isAdmin == true -> Icons.Default.AdminPanelSettings
+                        user?.isGuest == true -> Icons.Default.Visibility
+                        else -> Icons.Default.Person
+                    },
                     contentDescription = null,
                     modifier = Modifier.size(20.dp)
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
                     text = when {
-                        user == null -> "Vizitator (fără cont)"
+                        user == null -> "Se încarcă contul…"
                         user.isAdmin -> "Administrator · ${user.email}"
-                        else -> "Utilizator · ${user.email}"
+                        user.isGuest -> "Vizitator anonim · poți doar citi postările"
+                        else -> "Utilizator · ${user.email} · ${AuthProvider.label(user.provider)}"
                     },
                     style = MaterialTheme.typography.body2,
                     modifier = Modifier.weight(1f)
@@ -408,7 +419,7 @@ fun RoleBar(
                     TextButton(onClick = onOpenAdmin) { Text("Administrare") }
                 }
             }
-            if (user != null && !user.isAdmin) {
+            if (user != null && user.isRegularUser) {
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()

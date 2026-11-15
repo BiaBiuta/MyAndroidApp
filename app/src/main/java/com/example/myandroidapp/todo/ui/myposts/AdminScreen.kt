@@ -369,7 +369,8 @@ private fun UsersList(
                                 fontWeight = FontWeight.SemiBold
                             )
                             Text(
-                                (if (user.isBlocked) "BLOCAT · " else "") + "postări marcate cu: ${user.ownerKey}",
+                                (if (user.isBlocked) "BLOCAT · " else "") +
+                                        "Conectare: ${com.example.myandroidapp.auth.data.local.AuthProvider.label(user.provider)}",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = if (user.isBlocked) MaterialTheme.colorScheme.error
                                 else MaterialTheme.colorScheme.onSurfaceVariant

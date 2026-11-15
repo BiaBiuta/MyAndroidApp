@@ -4,6 +4,21 @@ import androidx.room.ColumnInfo
 import androidx.room.Entity
 import androidx.room.PrimaryKey
 
+/** Metoda cu care a fost creat contul (Google / Apple sunt simulate local: tema nu cere server). */
+object AuthProvider {
+    const val EMAIL = "EMAIL"
+    const val GOOGLE = "GOOGLE"
+    const val APPLE = "APPLE"
+    const val ANONYMOUS = "ANONYMOUS"
+
+    fun label(provider: String) = when (provider) {
+        GOOGLE -> "Google"
+        APPLE -> "Apple"
+        ANONYMOUS -> "Anonim"
+        else -> "E-mail și parolă"
+    }
+}
+
 /** Rolurile din aplicatie. */
 object UserRole {
     const val USER = "USER"
@@ -28,9 +43,19 @@ data class UserEntity(
     @ColumnInfo(defaultValue = "")
     val passwordHash: String = "",
     val isBlocked: Boolean = false,
+    // metoda de autentificare a contului (AuthProvider); migrarea 8 -> 9 pune EMAIL conturilor vechi
+    val provider: String = AuthProvider.EMAIL,
     val createdAt: Long = System.currentTimeMillis(),
     val lastLoginAt: Long = System.currentTimeMillis()
 )
 
 val UserEntity.isAdmin: Boolean
     get() = role == UserRole.ADMIN
+
+/** Vizitator anonim: poate doar citi postarile publice (nu publica, nu raporteaza, nu are sectiune privata). */
+val UserEntity.isGuest: Boolean
+    get() = provider == AuthProvider.ANONYMOUS
+
+/** Utilizator obisnuit cu cont (nu admin, nu vizitator anonim). */
+val UserEntity.isRegularUser: Boolean
+    get() = !isAdmin && !isGuest

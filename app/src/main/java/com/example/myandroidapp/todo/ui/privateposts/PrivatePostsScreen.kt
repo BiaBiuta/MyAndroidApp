@@ -1,6 +1,7 @@
 package com.example.myandroidapp.todo.ui.privateposts
 
 import androidx.biometric.BiometricManager
+import com.example.myandroidapp.auth.data.local.AuthProvider
 import androidx.biometric.BiometricPrompt
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -155,7 +156,10 @@ private fun PrivateLockContent(viewModel: PrivatePostsViewModel) {
         val info = BiometricPrompt.PromptInfo.Builder()
             .setTitle("Secțiune privată")
             .setSubtitle("Confirmați identitatea pentru a vedea postările private")
-            .setNegativeButtonText("Folosește e-mail și parola")
+            .setNegativeButtonText(
+                if (viewModel.usesPassword) "Folosește e-mail și parola"
+                else "Confirmă contul ${AuthProvider.label(viewModel.sessionProvider)}"
+            )
             .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_STRONG)
             .build()
         prompt.authenticate(info)
@@ -216,17 +220,20 @@ private fun PrivateLockContent(viewModel: PrivatePostsViewModel) {
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(12.dp)
         )
-        OutlinedTextField(
-            value = password,
-            onValueChange = { password = it },
-            label = { Text("Parolă") },
-            leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
-            singleLine = true,
-            visualTransformation = PasswordVisualTransformation(),
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        )
+        // Conturile Google / Apple nu au parola in aplicatie: se reconfirma contul la furnizor
+        if (viewModel.usesPassword) {
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Parolă") },
+                leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
+                singleLine = true,
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp)
+            )
+        }
 
         viewModel.errorMessage?.let {
             Text(it, color = MaterialTheme.colorScheme.error, textAlign = TextAlign.Center)
@@ -243,7 +250,10 @@ private fun PrivateLockContent(viewModel: PrivatePostsViewModel) {
             if (viewModel.verifying) {
                 CircularProgressIndicator(modifier = Modifier.size(22.dp), strokeWidth = 2.dp)
             } else {
-                Text("Deblochează cu e-mail și parolă")
+                Text(
+                    if (viewModel.usesPassword) "Deblochează cu e-mail și parolă"
+                    else "Confirmă contul ${AuthProvider.label(viewModel.sessionProvider)}"
+                )
             }
         }
     }

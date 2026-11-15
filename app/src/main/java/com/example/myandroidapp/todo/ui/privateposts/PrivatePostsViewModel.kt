@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.example.myandroidapp.MyApplication
+import com.example.myandroidapp.auth.data.local.AuthProvider
+import kotlinx.coroutines.delay
 import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.Post
@@ -41,6 +43,22 @@ class PrivatePostsViewModel(
     var errorMessage by mutableStateOf<String?>(null)
         private set
 
+    /**
+     * Metoda de autentificare a sesiunii (AuthProvider). Conturile Google / Apple nu au parola,
+     * deci varianta de rezerva e reconfirmarea contului la furnizor (simulata: adresa contului).
+     */
+    var sessionProvider by mutableStateOf(AuthProvider.EMAIL)
+        private set
+
+    val usesPassword: Boolean
+        get() = sessionProvider == AuthProvider.EMAIL
+
+    init {
+        viewModelScope.launch {
+            sessionProvider = userPreferencesRepository.userPreferencesStream.first().provider
+        }
+    }
+
     /** Doar postarile private ale utilizatorului logat acum. */
     @OptIn(ExperimentalCoroutinesApi::class)
     val privatePosts: Flow<List<Post>> = userPreferencesRepository.userPreferencesStream
@@ -53,8 +71,9 @@ class PrivatePostsViewModel(
 
     fun onBiometricSuccess() {
         viewModelScope.launch {
-            // Vizitatorii (Google / Apple / anonim) nu au cont, deci nu au sectiune privata
-            if (userPreferencesRepository.userPreferencesStream.first().token.isEmpty()) {
+            // Vizitatorul anonim (sau nicio sesiune) nu are sectiune privata
+            val prefs = userPreferencesRepository.userPreferencesStream.first()
+            if (prefs.token.isEmpty() || prefs.provider == AuthProvider.ANONYMOUS) {
                 errorMessage = NO_ACCOUNT_MESSAGE
             } else {
                 errorMessage = null
@@ -69,8 +88,8 @@ class PrivatePostsViewModel(
 
     /** E-mail-ul trebuie sa fie al sesiunii curente, iar parola sa corespunda hash-ului salvat. */
     fun verifyCredentials(email: String, password: String) {
-        if (email.isBlank() || password.isBlank()) {
-            errorMessage = "Introduceți e-mailul și parola."
+        if (email.isBlank() || (usesPassword && password.isBlank())) {
+            errorMessage = if (usesPassword) "Introduceți e-mailul și parola." else "Introduceți adresa contului."
             return
         }
         viewModelScope.launch {
@@ -78,9 +97,16 @@ class PrivatePostsViewModel(
             errorMessage = null
             val prefs = userPreferencesRepository.userPreferencesStream.first()
             val ok = when {
-                prefs.token.isEmpty() -> {
+                prefs.token.isEmpty() || prefs.provider == AuthProvider.ANONYMOUS -> {
                     errorMessage = NO_ACCOUNT_MESSAGE
                     false
+                }
+                // Google / Apple: reconfirmarea contului la furnizor (simulata) = aceeasi adresa
+                prefs.provider == AuthProvider.GOOGLE || prefs.provider == AuthProvider.APPLE -> {
+                    delay(500)
+                    val same = email.trim().equals(prefs.email, ignoreCase = true)
+                    if (!same) errorMessage = "Contul ${AuthProvider.label(prefs.provider)} nu corespunde sesiunii curente."
+                    same
                 }
                 prefs.passwordHash.isEmpty() -> {
                     errorMessage = "Parola nu poate fi verificată pentru această sesiune. " +
@@ -106,7 +132,7 @@ class PrivatePostsViewModel(
 
     companion object {
         private const val NO_ACCOUNT_MESSAGE =
-            "Secțiunea privată este disponibilă doar utilizatorilor conectați cu e-mail și parolă."
+            "Secțiunea privată este disponibilă doar utilizatorilor cu cont (nu vizitatorilor anonimi)."
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {

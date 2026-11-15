@@ -25,9 +25,10 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 6: credentialele (hash-ul parolei) in tabela users
 // version 7: raspunsul adminului la raportari (status, mesaj)
 // version 8: mesajele pentru autorii postarilor sterse de admin (author_notices)
+// version 9: metoda de autentificare a fiecarui cont (users.provider)
 @Database(
     entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class],
-    version = 8
+    version = 9
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -106,6 +107,13 @@ abstract class MyAppDatabase : RoomDatabase() {
                             "`reasons` TEXT NOT NULL, `message` TEXT NOT NULL, `adminId` TEXT NOT NULL, " +
                             "`createdAt` INTEGER NOT NULL, `isRead` INTEGER NOT NULL)"
                 )
+            }
+        }
+
+        // 8 -> 9: coloana provider; conturile existente sunt create cu e-mail si parola
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `users` ADD COLUMN `provider` TEXT NOT NULL DEFAULT 'EMAIL'")
             }
         }
 

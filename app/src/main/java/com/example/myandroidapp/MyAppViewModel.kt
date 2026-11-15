@@ -115,7 +115,8 @@ class MyAppViewModel(
                     token = prefs.token,
                     user = prefs.user,
                     biometricEnabled = enabled,
-                    passwordHash = prefs.passwordHash
+                    passwordHash = prefs.passwordHash,
+                    provider=prefs.provider
                 )
             )
         }

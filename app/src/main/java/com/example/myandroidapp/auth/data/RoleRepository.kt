@@ -1,6 +1,7 @@
 package com.example.myandroidapp.auth.data
 
 import android.util.Log
+import com.example.myandroidapp.auth.data.local.AuthProvider
 import com.example.myandroidapp.auth.data.local.UserDao
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.UserRole
@@ -61,10 +62,44 @@ class RoleRepository(
                 email = email,
                 ownerKey = prefs.ownerKey,
                 displayName = email.substringBefore("@"),
-                role = if (email in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER
+                role = if (email in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER,
+                provider = prefs.provider
             )
         userDao.upsert(user)
     }
+
+    // ---------- Google / Apple / anonim (conturi locale, fara parola) ----------
+
+    /** Rezultatul unui login cu furnizor: contul local incarcat / creat, sau refuzat. */
+    sealed interface ProviderSignIn {
+        data class Success(val user: UserEntity, val isNewAccount: Boolean) : ProviderSignIn
+        data object Blocked : ProviderSignIn
+    }
+
+    /**
+     * Login cu Google, Apple sau anonim: cauta contul in baza de date locala dupa e-mail
+     * si il incarca (cu rolul si datele lui); daca nu exista, il creeaza.
+     * Un cont existent creat cu e-mail si parola, folosit acum cu Google, ramane acelasi cont
+     * (aceleasi postari), ca la "account linking".
+     */
+    suspend fun signInWithProvider(email: String, provider: String): ProviderSignIn {
+        val normalized = normalize(email)
+        val existing = userDao.findByEmail(normalized)
+        if (existing?.isBlocked == true) return ProviderSignIn.Blocked
+        val user = existing?.copy(lastLoginAt = System.currentTimeMillis())
+            ?: UserEntity(
+                email = normalized,
+                ownerKey = normalized,
+                displayName = if (provider == AuthProvider.ANONYMOUS) "Vizitator" else normalized.substringBefore("@"),
+                role = if (normalized in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER,
+                provider = provider
+            )
+        userDao.upsert(user)
+        return ProviderSignIn.Success(user, isNewAccount = existing == null)
+    }
+
+    /** Conturile Google / Apple folosite deja pe acest telefon (pentru selectorul de cont). */
+    suspend fun accountsFor(provider: String): List<UserEntity> = userDao.findByProvider(provider)
 
     // ---------- Credentiale (login offline) ----------
 
@@ -140,6 +175,9 @@ class RoleRepository(
     suspend fun changeRole(email: String, newRole: String): String? {
         val admin = requireAdmin() ?: return "Doar administratorii pot schimba rolurile."
         val target = userDao.findByEmail(email) ?: return "Utilizatorul nu mai există."
+        if (newRole == UserRole.ADMIN && target.provider == AuthProvider.ANONYMOUS) {
+            return "Un vizitator anonim nu poate deveni administrator."
+        }
         if (target.role == UserRole.ADMIN && newRole == UserRole.USER &&
             !target.isBlocked && userDao.countActiveAdmins() <= 1
         ) {

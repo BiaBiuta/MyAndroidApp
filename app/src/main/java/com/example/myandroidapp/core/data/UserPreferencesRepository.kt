@@ -27,6 +27,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
         val token = stringPreferencesKey("token")
         val biometricEnabled = booleanPreferencesKey("biometric_enabled")
         val passwordHash = stringPreferencesKey("password_hash")
+        val provider = stringPreferencesKey("provider")
     }
 
     init {
@@ -60,6 +61,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             preferences[PreferencesKeys.userKey] = userJson
             preferences[PreferencesKeys.biometricEnabled] = userPreferences.biometricEnabled
             preferences[PreferencesKeys.passwordHash] = encryptedHash
+            preferences[PreferencesKeys.provider] = userPreferences.provider
         }
     }
 
@@ -105,7 +107,8 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
             token = token,
             user = user,
             biometricEnabled = biometricEnabled,
-            passwordHash = passwordHash
+            passwordHash = passwordHash,
+            provider = preferences[PreferencesKeys.provider] ?: "EMAIL"
         )
     }
 }

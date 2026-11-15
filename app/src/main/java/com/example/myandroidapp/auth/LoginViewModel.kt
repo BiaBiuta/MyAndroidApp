@@ -7,6 +7,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
+import com.example.myandroidapp.auth.data.local.AuthProvider
 import com.example.myandroidapp.auth.data.remote.User
 import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.TAG
@@ -22,7 +23,12 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /** Metoda de autentificare aflata in curs -> doar butonul ei arata indicatorul de incarcare. */
-enum class AuthMethod { EMAIL, GOOGLE, APPLE, ANONYMOUS }
+enum class AuthMethod(val provider: String) {
+    EMAIL(AuthProvider.EMAIL),
+    GOOGLE(AuthProvider.GOOGLE),
+    APPLE(AuthProvider.APPLE),
+    ANONYMOUS(AuthProvider.ANONYMOUS)
+}
 
 data class LoginUiState(
     val isLoginMode: Boolean = true,
@@ -36,6 +42,11 @@ data class LoginUiState(
     val passwordCheck: PasswordPolicy.Result? = null,
     // login blocat temporar dupa prea multe incercari gresite (secunde ramase)
     val lockoutSecondsLeft: Int = 0,
+    // selectorul de cont Google / Apple (simulat): deschis pentru metoda data
+    val providerPicker: AuthMethod? = null,
+    val knownProviderAccounts: List<String> = emptyList(),
+    val providerEmail: String = "",
+    val providerEmailError: String? = null,
     val isAuthenticating: Boolean = false,
     val activeMethod: AuthMethod? = null,
     val authenticationError: Throwable? = null,
@@ -55,6 +66,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     private val roleRepository = container.roleRepository
     private val biometricChoices = BiometricChoiceStore(application)
     private val loginThrottle = LoginThrottle(application)
+    private val guestIdentity = GuestIdentity(application)
     private var lockoutJob: Job? = null
 
     // Sesiunea (token + user) primita la login. O salvam abia dupa ce utilizatorul
@@ -255,24 +267,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
 
-            val previousChoice = biometricChoices.choiceFor(session.email)
-            if (biometricHardwarePresent() && previousChoice == null) {
-                // Prima conectare a acestui cont -> intrebam o singura data daca activeaza amprenta
-                pendingSession = session
-                _uiState.update {
-                    it.copy(
-                        showBiometricOnboardingPrompt = true,
-                        biometricNeedsEnrollment = !biometricAvailable()
-                    )
-                }
-            } else {
-                // Cont cunoscut (ex. fallback cu parola dupa ce amprenta a esuat):
-                // reaplicam alegerea salvata, fara sa mai afisam dialogul.
-                onSessionUnlocked()
-                userPreferencesRepository.save(
-                    session.withBiometric(previousChoice == true && biometricAvailable())
-                )
-            }
+            finishSignIn(session, onSessionUnlocked)
         }
     }
 
@@ -358,21 +353,129 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         }
     }
 
-    // Google / Apple / anonim sunt demo si nu au token, deci nu creeaza o sesiune salvata:
-    // nu pot fi deblocate ulterior cu amprenta si nu au sectiune privata.
-    fun signInWithProvider(method: AuthMethod, onEnterWithoutSession: () -> Unit) {
+    // ---------- Google / Apple / anonim ----------
+    // Tema nu cere integrare reala cu Google / Apple: selectorul de cont e simulat, dar contul
+    // ales se creeaza / se incarca din baza de date locala, cu rolul si datele lui, exact ca la e-mail.
+
+    /** Deschide selectorul de cont (simulat) pentru Google sau Apple. */
+    fun openProviderPicker(method: AuthMethod) {
+        viewModelScope.launch {
+            val accounts = roleRepository.accountsFor(method.provider).map { it.email }
+            _uiState.update {
+                it.copy(
+                    providerPicker = method,
+                    knownProviderAccounts = accounts,
+                    providerEmail = "",
+                    providerEmailError = null,
+                    generalErrorMessage = null
+                )
+            }
+        }
+    }
+
+    fun dismissProviderPicker() {
+        _uiState.update { it.copy(providerPicker = null, providerEmailError = null) }
+    }
+
+    fun onProviderEmailChanged(email: String) {
+        val trimmed = email.trim()
+        _uiState.update {
+            it.copy(
+                providerEmail = trimmed,
+                providerEmailError = if (trimmed.isNotEmpty() &&
+                    !android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()
+                ) "Format de e-mail invalid" else null
+            )
+        }
+    }
+
+    /** Contul ales in selector: il incarcam / il cream in baza locala si deschidem sesiunea. */
+    fun confirmProviderAccount(email: String, onSessionUnlocked: () -> Unit) {
+        val method = _uiState.value.providerPicker ?: return
+        val trimmed = email.trim()
+        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()) {
+            _uiState.update { it.copy(providerEmailError = "Introduceți o adresă de e-mail validă") }
+            return
+        }
+        _uiState.update { it.copy(providerPicker = null) }
+        signInLocally(method, trimmed, onSessionUnlocked)
+    }
+
+    /** Vizitator anonim: acelasi cont local de vizitator pe acest telefon (GuestIdentity). */
+    fun signInAnonymously(onSessionUnlocked: () -> Unit) =
+        signInLocally(AuthMethod.ANONYMOUS, guestIdentity.email(), onSessionUnlocked)
+
+    private fun signInLocally(method: AuthMethod, email: String, onSessionUnlocked: () -> Unit) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(isAuthenticating = true, activeMethod = method, generalErrorMessage = null)
             }
-            delay(900)
-            _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
-            onEnterWithoutSession()
+            delay(700) // raspunsul simulat al furnizorului
+            val result = try {
+                roleRepository.signInWithProvider(email, method.provider)
+            } catch (e: Exception) {
+                Log.w(TAG, "provider sign-in failed", e)
+                null
+            }
+            when (result) {
+                is RoleRepository.ProviderSignIn.Success -> {
+                    val user = result.user
+                    val session = UserPreferences(
+                        email = user.email,
+                        token = "local-" + method.provider.lowercase() + "-" + java.util.UUID.randomUUID(),
+                        // id-ul de pe server (daca exista) pastreaza postarile contului
+                        user = User(user.email, "", user.ownerKey.toIntOrNull() ?: 0),
+                        provider = method.provider
+                    )
+                    _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
+                    finishSignIn(session, onSessionUnlocked)
+                }
+                RoleRepository.ProviderSignIn.Blocked -> _uiState.update {
+                    it.copy(isAuthenticating = false, activeMethod = null, generalErrorMessage = RoleRepository.BLOCKED_MESSAGE)
+                }
+                null -> _uiState.update {
+                    it.copy(
+                        isAuthenticating = false,
+                        activeMethod = null,
+                        generalErrorMessage = "Conectarea nu a reușit. Încercați din nou."
+                    )
+                }
+            }
         }
     }
 
-    fun signInAnonymously(onEnterWithoutSession: () -> Unit) =
-        signInWithProvider(AuthMethod.ANONYMOUS, onEnterWithoutSession)
+    /**
+     * Pasul comun dupa ORICE login reusit (e-mail, Google, Apple, anonim):
+     *  - vizitatorul anonim intra direct (fara amprenta);
+     *  - prima conectare a unui cont -> dialogul "Activează autentificarea biometrică";
+     *  - cont cunoscut -> se reaplica alegerea salvata pentru amprenta.
+     * Sesiunea se salveaza in DataStore (token-ul criptat), iar MyAppNavHost intra in aplicatie.
+     */
+    private suspend fun finishSignIn(session: UserPreferences, onSessionUnlocked: () -> Unit) {
+        if (session.provider == AuthProvider.ANONYMOUS) {
+            onSessionUnlocked()
+            userPreferencesRepository.save(session)
+            return
+        }
+        val previousChoice = biometricChoices.choiceFor(session.email)
+        if (biometricHardwarePresent() && previousChoice == null) {
+            // Prima conectare a acestui cont -> intrebam o singura data daca activeaza amprenta
+            pendingSession = session
+            _uiState.update {
+                it.copy(
+                    showBiometricOnboardingPrompt = true,
+                    biometricNeedsEnrollment = !biometricAvailable()
+                )
+            }
+        } else {
+            // Cont cunoscut (ex. fallback cu parola dupa ce amprenta a esuat):
+            // reaplicam alegerea salvata, fara sa mai afisam dialogul.
+            onSessionUnlocked()
+            userPreferencesRepository.save(
+                session.withBiometric(previousChoice == true && biometricAvailable())
+            )
+        }
+    }
 
     /** Raspunsul la dialogul "Activează autentificarea biometrică". */
     fun setBiometricsEnabled(enable: Boolean, onSessionUnlocked: () -> Unit) {
@@ -393,7 +496,8 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         token = token,
         user = user,
         biometricEnabled = enabled,
-        passwordHash = passwordHash
+        passwordHash = passwordHash,
+        provider = provider
     )
 
     /** Apelat cand utilizatorul revine din ecranul de sistem pentru adaugarea amprentei. */

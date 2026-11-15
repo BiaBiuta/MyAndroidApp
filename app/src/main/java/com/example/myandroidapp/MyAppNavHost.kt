@@ -5,6 +5,8 @@ import android.util.Log
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.auth.data.local.isGuest
+import com.example.myandroidapp.auth.data.local.isRegularUser
 import com.example.myandroidapp.todo.ui.admin.AdminScreen
 import com.example.myandroidapp.todo.ui.myposts.MyPostsScreen
 import com.example.myandroidapp.todo.ui.myreports.MyReportsScreen
@@ -104,23 +106,24 @@ fun MyAppNavHost() {
                 onOpenAdmin = { navController.navigate(adminRoute) },
                 onOpenMyReports = { navController.navigate(myReportsRoute) },
                 onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
-                showBiometricToggle = sessionState is SessionState.Active,
+                // vizitatorul anonim nu are ce debloca cu amprenta
+                showBiometricToggle = sessionState is SessionState.Active && currentUser?.isGuest != true,
                 biometricEnabled = biometricEnabled,
                 onBiometricToggle = { enabled -> myAppViewModel.setBiometricEnabled(appContext, enabled) })
         }
-        // Doar rolul USER
+        // Doar rolul USER (nu admin, nu vizitator anonim)
         composable(route = myPostsRoute) {
-            MyPostsScreen(
-                onBack = { navController.popBackStack() },
-                onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
-            )
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                MyPostsScreen(
+                    onBack = { navController.popBackStack() },
+                    onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
+                )
+            }
         }
         // Doar rolul USER: raportarile trimise, cu statusul si raspunsul adminului
         composable(route = myReportsRoute) {
-            if (currentUser != null && currentUser?.isAdmin != true) {
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
                 MyReportsScreen(onBack = { navController.popBackStack() })
-            } else {
-                LaunchedEffect(Unit) { navController.popBackStack() }
             }
         }
         // Editarea unei postari proprii (dreptul e verificat si in EditPostViewModel)
@@ -139,18 +142,14 @@ fun MyAppNavHost() {
         }
         // Doar rolul ADMIN (actiunile sunt verificate si in RoleRepository)
         composable(route = adminRoute) {
-            if (currentUser?.isAdmin == true) {
+            RoleGuard(allowed = currentUser?.isAdmin == true, onDenied = { navController.popBackStack() }) {
                 AdminScreen(onBack = { navController.popBackStack() })
-            } else {
-                LaunchedEffect(Unit) { navController.popBackStack() }
             }
         }
-        // Adaugarea de postari: doar utilizatorii (si vizitatorii), NU adminul — el doar modereaza
+        // Adaugarea de postari: doar USER. Adminul modereaza, vizitatorul anonim doar citeste.
         composable(route = "$postsRoute-new")
         {
-            if (currentUser?.isAdmin == true) {
-                AdminCannotPost { navController.popBackStack() }
-            } else {
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
                 PostAddScreen(
                     onClose = { onClose() }
                 )
@@ -159,9 +158,7 @@ fun MyAppNavHost() {
         // Adaugare din sectiunea privata: comutatorul "Postare privată" e pornit implicit
         composable(route = "$postsRoute-new-private")
         {
-            if (currentUser?.isAdmin == true) {
-                AdminCannotPost { navController.popBackStack() }
-            } else {
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
                 PostAddScreen(
                     onClose = { onClose() },
                     isPrivateInitially = true
@@ -170,11 +167,14 @@ fun MyAppNavHost() {
         }
         composable(route = privateRoute)
         {
-            PrivatePostsScreen(
-                onBack = { navController.popBackStack() },
-                onAddPrivatePost = { navController.navigate("$postsRoute-new-private") },
-                canAddPost = currentUser?.isAdmin != true
-            )
+            // Sectiunea privata: doar USER (datele private sunt ale contului, criptate)
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                PrivatePostsScreen(
+                    onBack = { navController.popBackStack() },
+                    onAddPrivatePost = { navController.navigate("$postsRoute-new-private") },
+                    canAddPost = true
+                )
+            }
         }
         composable(route = authRoute)
         {
@@ -232,12 +232,22 @@ fun MyAppNavHost() {
     }
 }
 
-/** Adminul a ajuns pe ecranul de adaugare (ex. link vechi) -> mesaj si inapoi. */
+/**
+ * Verificarea rolului pentru o ruta (pe langa butoanele ascunse si verificarile din ViewModel-uri):
+ * cine nu are voie (ex. un link vechi sau back stack) primeste un mesaj si e trimis inapoi.
+ * Cat timp contul inca se incarca din baza de date, nu afisam nimic.
+ */
 @Composable
-private fun AdminCannotPost(onBack: () -> Unit) {
+private fun RoleGuard(allowed: Boolean, onDenied: () -> Unit, content: @Composable () -> Unit) {
+    if (allowed) {
+        content()
+        return
+    }
     val context = LocalContext.current
     LaunchedEffect(Unit) {
-        Toast.makeText(context, "Administratorii nu pot publica postări.", Toast.LENGTH_SHORT).show()
-        onBack()
+        // currentUser vine dintr-un Flow; ii lasam o clipa sa se incarce inainte sa refuzam
+        kotlinx.coroutines.delay(300)
+        Toast.makeText(context, "Nu aveți acces la această secțiune.", Toast.LENGTH_SHORT).show()
+        onDenied()
     }
 }

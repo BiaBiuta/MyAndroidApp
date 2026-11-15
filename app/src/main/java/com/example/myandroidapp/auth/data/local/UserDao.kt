@@ -15,6 +15,10 @@ interface UserDao {
     fun observeByEmail(email: String): Flow<UserEntity?>
 
     // Panoul de administrare: toti utilizatorii care s-au conectat pe acest telefon
+    // Conturile folosite pe acest telefon cu un anumit furnizor (Google / Apple), cel mai recent primul
+    @Query("SELECT * FROM users WHERE provider = :provider ORDER BY lastLoginAt DESC")
+    suspend fun findByProvider(provider: String): List<UserEntity>
+
     @Query("SELECT * FROM users ORDER BY role ASC, email ASC")
     fun observeAll(): Flow<List<UserEntity>>
 

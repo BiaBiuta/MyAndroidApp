@@ -31,11 +31,17 @@
     <string name="auth_apple">Continuați cu Apple</string>
     <string name="auth_anonymous">Explorează ca vizitator anonim</string>
     <string name="auth_loading_provider">Se conectează…</string>
-    <string name="auth_provider_note">Google, Apple și vizitatorul anonim sunt demo-uri: intri fără cont salvat.</string>
+    <string name="auth_provider_note">Google și Apple sunt simulate local; vizitatorul anonim poate doar citi postările.</string>
+    <string name="provider_picker_title">Alege un cont %1$s</string>
+    <string name="provider_picker_body">Intră în WanderLog cu contul %1$s. Contul și datele lui se salvează în baza de date de pe acest telefon.</string>
+    <string name="provider_picker_email">Adresa contului %1$s</string>
+    <string name="provider_picker_other">Folosește alt cont</string>
+    <string name="provider_picker_continue">Continuă</string>
+    <string name="provider_picker_cancel">Anulează</string>
 
     <!-- Biometrie -->
     <string name="bio_locked_title">Sesiune blocată</string>
-    <string name="bio_locked_body">Deblochează cu amprenta sau conectează-te mai jos cu e-mail și parola.</string>
+    <string name="bio_locked_body">Deblochează cu amprenta sau conectează-te din nou mai jos, cu aceeași metodă ca prima dată.</string>
     <string name="bio_unlock_button">Deblochează cu amprenta</string>
     <string name="bio_prompt_title">Deblocare WanderLog</string>
     <string name="bio_prompt_subtitle">Atingeți senzorul pentru a debloca sesiunea curentă</string>

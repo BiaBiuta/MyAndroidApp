@@ -95,7 +95,7 @@ private val ButtonHeight = 48.dp
  *        deblocarea. Doar atunci amprenta poate deschide aplicatia.
  * @param onSessionUnlocked login cu parola reusit sau amprenta acceptata -> sesiunea e deblocata;
  *        MyAppNavHost navigheaza in ecranul principal cand sesiunea devine activa.
- * @param onEnterWithoutSession intrare demo fara token (Google / Apple / anonim).
+ * @param onEnterWithoutSession nefolosit: toate metodele (inclusiv Google / Apple / anonim) creeaza acum o sesiune locala.
  */
 @Composable
 fun LoginScreen(
@@ -399,7 +399,7 @@ fun LoginScreen(
                 GoogleSignInButton(
                     loading = state.activeMethod == AuthMethod.GOOGLE,
                     enabled = !state.isAuthenticating,
-                    onClick = { viewModel.signInWithProvider(AuthMethod.GOOGLE, onEnterWithoutSession) }
+                    onClick = { viewModel.openProviderPicker(AuthMethod.GOOGLE) }
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -407,13 +407,13 @@ fun LoginScreen(
                 AppleSignInButton(
                     loading = state.activeMethod == AuthMethod.APPLE,
                     enabled = !state.isAuthenticating,
-                    onClick = { viewModel.signInWithProvider(AuthMethod.APPLE, onEnterWithoutSession) }
+                    onClick = { viewModel.openProviderPicker(AuthMethod.APPLE) }
                 )
 
                 Spacer(modifier = Modifier.height(8.dp))
 
                 TextButton(
-                    onClick = { if (!state.isAuthenticating) viewModel.signInAnonymously(onEnterWithoutSession) },
+                    onClick = { if (!state.isAuthenticating) viewModel.signInAnonymously(onSessionUnlocked) },
                     enabled = !state.isAuthenticating || state.activeMethod == AuthMethod.ANONYMOUS,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -449,6 +449,19 @@ fun LoginScreen(
         } else {
             biometricStatus = null
         }
+    }
+
+    // Selectorul de cont Google / Apple (simulat): contul ales se incarca din baza de date locala
+    state.providerPicker?.let { method ->
+        ProviderAccountDialog(
+            method = method,
+            knownAccounts = state.knownProviderAccounts,
+            email = state.providerEmail,
+            emailError = state.providerEmailError,
+            onEmailChange = viewModel::onProviderEmailChanged,
+            onPick = { email -> viewModel.confirmProviderAccount(email, onSessionUnlocked) },
+            onDismiss = viewModel::dismissProviderPicker
+        )
     }
 
     if (state.showBiometricOnboardingPrompt) {
@@ -498,6 +511,89 @@ fun LoginScreen(
             }
         )
     }
+}
+
+/**
+ * Selectorul de cont pentru Google / Apple. Tema cere doar interfata pentru furnizori, deci
+ * selectorul e simulat: arata conturile deja folosite pe telefon (din baza locala) si permite
+ * adaugarea altui cont. Contul ales primeste sesiune locala, cu rolul si datele lui.
+ */
+@Composable
+private fun ProviderAccountDialog(
+    method: AuthMethod,
+    knownAccounts: List<String>,
+    email: String,
+    emailError: String?,
+    onEmailChange: (String) -> Unit,
+    onPick: (String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    val providerName = if (method == AuthMethod.APPLE) "Apple" else "Google"
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        icon = {
+            if (method == AuthMethod.APPLE) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_apple_logo),
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.size(32.dp)
+                )
+            } else {
+                Image(
+                    painter = painterResource(R.drawable.ic_google_logo),
+                    contentDescription = null,
+                    modifier = Modifier.size(32.dp)
+                )
+            }
+        },
+        title = { Text(stringResource(R.string.provider_picker_title, providerName)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    stringResource(R.string.provider_picker_body, providerName),
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                knownAccounts.forEach { account ->
+                    OutlinedButton(
+                        onClick = { onPick(account) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = ButtonHeight)
+                    ) {
+                        Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(account, modifier = Modifier.weight(1f))
+                    }
+                }
+                OutlinedTextField(
+                    value = email,
+                    onValueChange = onEmailChange,
+                    label = {
+                        Text(
+                            if (knownAccounts.isEmpty()) stringResource(R.string.provider_picker_email, providerName)
+                            else stringResource(R.string.provider_picker_other)
+                        )
+                    },
+                    isError = emailError != null,
+                    supportingText = { emailError?.let { FieldError(it) } },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Email, imeAction = ImeAction.Done),
+                    keyboardActions = KeyboardActions(onDone = { onPick(email) }),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        },
+        confirmButton = {
+            Button(onClick = { onPick(email) }, enabled = email.isNotBlank() && emailError == null) {
+                Text(stringResource(R.string.provider_picker_continue))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text(stringResource(R.string.provider_picker_cancel)) }
+        }
+    )
 }
 
 @Composable

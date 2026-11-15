@@ -13,6 +13,8 @@ import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.auth.data.local.isGuest
+import com.example.myandroidapp.auth.data.local.isRegularUser
 import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
 import com.example.myandroidapp.todo.ui.admin.AdminViewModel
 import com.example.myandroidapp.core.TAG
@@ -94,15 +96,15 @@ class PostsViewModel(
 
     /** ADMIN: orice postare. USER: doar postarile proprii. */
     fun canDelete(post: Post, user: UserEntity?): Boolean =
-        user != null && (user.isAdmin || post.user_id == user.ownerKey)
+        user != null && !user.isGuest && (user.isAdmin || post.user_id == user.ownerKey)
 
     /** Doar autorul isi poate edita postarea (adminul modereaza, nu rescrie postarile altora). */
     fun canEdit(post: Post, user: UserEntity?): Boolean =
-        user != null && !user.isBlocked && post.user_id.isNotEmpty() && post.user_id == user.ownerKey
+        user != null && !user.isBlocked && !user.isGuest && post.user_id.isNotEmpty() && post.user_id == user.ownerKey
 
     /** Doar USER (nu admin, nu vizitator) poate raporta postarile altora. */
     fun canReport(post: Post, user: UserEntity?): Boolean =
-        user != null && !user.isAdmin && post.user_id != user.ownerKey
+        user != null && user.isRegularUser && post.user_id != user.ownerKey
 
     fun deletePost(post: Post) {
         viewModelScope.launch {

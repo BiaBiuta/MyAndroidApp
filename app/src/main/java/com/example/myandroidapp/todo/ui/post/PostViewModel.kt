@@ -21,6 +21,7 @@ import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.auth.data.local.isGuest
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
 import kotlinx.coroutines.launch
@@ -175,15 +176,20 @@ class PostViewModel(private val postId: String?, private val itemRepository: Pos
     }
 
     /**
-     * Verificare si la salvare, nu doar in UI: adminul nu poate publica postari.
-     * Intoarce true (si marcheaza eroarea) daca utilizatorul curent e admin.
+     * Verificare si la salvare, nu doar in UI: doar USER publica postari.
+     * Intoarce true (si marcheaza eroarea) daca utilizatorul curent NU are voie
+     * (administrator, vizitator anonim sau nicio sesiune).
      */
     private suspend fun isAdmin(): Boolean {
         val user = (application as MyApplication).container.roleRepository.currentUserOnce()
-        if (user?.isAdmin == true) {
-            uiState = uiState.copy(
-                submitResult = Result.Error(IllegalStateException("Administratorii nu pot publica postări."))
-            )
+        val reason = when {
+            user == null -> "Conectați-vă pentru a publica postări."
+            user.isAdmin -> "Administratorii nu pot publica postări."
+            user.isGuest -> "Vizitatorii anonimi nu pot publica postări. Creați un cont."
+            else -> null
+        }
+        if (reason != null) {
+            uiState = uiState.copy(submitResult = Result.Error(IllegalStateException(reason)))
             return true
         }
         return false

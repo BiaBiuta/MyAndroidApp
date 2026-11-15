@@ -10,7 +10,9 @@ class UserPreferences(
     val token: String = "",
     val user: User = User(email, "", 0),
     val biometricEnabled: Boolean = false,
-    val passwordHash: String = ""
+    val passwordHash: String = "",
+    // metoda de autentificare a sesiunii (AuthProvider): EMAIL, GOOGLE, APPLE sau ANONYMOUS
+    val provider: String = "EMAIL"
 ) {
     /**
      * Identificatorul proprietarului postarilor: id-ul de pe server daca exista,
