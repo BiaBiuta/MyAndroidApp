@@ -123,7 +123,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
