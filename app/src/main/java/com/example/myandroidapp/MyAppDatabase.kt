@@ -26,9 +26,10 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 7: raspunsul adminului la raportari (status, mesaj)
 // version 8: mesajele pentru autorii postarilor sterse de admin (author_notices)
 // version 9: metoda de autentificare a fiecarui cont (users.provider)
+// version 10: postari cu titlu, rating, data vizitei, ciorna, ascundere si stare de sincronizare
 @Database(
     entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class],
-    version = 9
+    version = 10
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -117,6 +118,24 @@ abstract class MyAppDatabase : RoomDatabase() {
             }
         }
 
+        // 9 -> 10: campurile noi ale postarii; postarile existente raman, ca "sincronizate"
+        private val MIGRATION_9_10 = object : Migration(9, 10) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                listOf(
+                    "`title` TEXT NOT NULL DEFAULT ''",
+                    "`rating` INTEGER NOT NULL DEFAULT 0",
+                    "`visit_date` INTEGER NOT NULL DEFAULT 0",
+                    "`status` TEXT NOT NULL DEFAULT 'ACTIVE'",
+                    "`hidden` INTEGER NOT NULL DEFAULT 0",
+                    "`syncStatus` TEXT NOT NULL DEFAULT 'SYNCED'",
+                    "`syncError` TEXT NOT NULL DEFAULT ''",
+                    "`isDeleted` INTEGER NOT NULL DEFAULT 0"
+                ).forEach { column -> db.execSQL("ALTER TABLE `posts` ADD COLUMN $column") }
+                // postarile din coada (create offline cu versiunea veche) devin "Pending"
+                db.execSQL("UPDATE `posts` SET `syncStatus` = 'PENDING' WHERE `isNotSaved` = 1")
+            }
+        }
+
         /**
          * La fiecare deschidere a bazei de date: pozele mai mari de ~1 MB (text Base64) se golesc.
          * SQLite pe Android nu poate citi un rand mai mare de ~2 MB ("Row too big to fit into
@@ -136,7 +155,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
                     .fallbackToDestructiveMigration()
                     .addCallback(REPAIR_OVERSIZED_PHOTOS)
                     .build()

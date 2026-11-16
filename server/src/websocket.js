@@ -177,6 +177,18 @@ class WsHub {
     }
   }
 
+  /**
+   * Trimite fiecarui client autorizat mesajul calculat pentru el ([messageFor](utilizator)
+   * intoarce mesajul sau null): ciornele si postarile ascunse nu ajung la cine nu le poate vedea.
+   */
+  broadcastWith(messageFor) {
+    for (const connection of this.connections) {
+      if (!connection.user || connection.closed) continue;
+      const message = messageFor(connection.user);
+      if (message) connection.sendJson(message);
+    }
+  }
+
   /** Trimite evenimentul tuturor clientilor autorizati. */
   broadcast(event, item) {
     for (const connection of this.connections) {

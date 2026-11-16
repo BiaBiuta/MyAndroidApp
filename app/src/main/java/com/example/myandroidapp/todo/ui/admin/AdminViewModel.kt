@@ -16,7 +16,9 @@ import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.UserRole
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
+import com.example.myandroidapp.todo.data.remote.ServerStats
 import com.example.myandroidapp.todo.data.local.ReportEntity
 import com.example.myandroidapp.todo.data.local.ReportedPost
 import kotlinx.coroutines.flow.Flow
@@ -50,6 +52,48 @@ class AdminViewModel(
         private set
 
     /** Aduce utilizatorii de pe server; offline, se vede lista salvata pe telefon. */
+    /** Toate postarile din feed (inclusiv cele ascunse, pe care serverul le trimite doar adminilor). */
+    val allPosts: Flow<List<Post>> = postRepository.itemStream
+
+    /** Statisticile de pe server (null = inca neincarcate sau offline). */
+    var stats by mutableStateOf<ServerStats?>(null)
+        private set
+
+    /** Reincarca tot ce vede moderatorul: statistici, postari, utilizatori. */
+    fun refreshAll() {
+        refreshStats()
+        refreshUsers()
+        viewModelScope.launch { postRepository.refresh()?.let { message = it } }
+    }
+
+    fun refreshStats() {
+        viewModelScope.launch {
+            stats = try {
+                postRepository.stats()
+            } catch (e: Exception) {
+                Log.w("AdminViewModel", "stats failed", e)
+                null
+            }
+        }
+    }
+
+    /** Ascunde / reafiseaza postarea oricui (doar cu conexiune: schimba ce vad toti). */
+    fun toggleHidden(post: Post) = runAdmin(
+        if (post.hidden) "Postarea este din nou vizibilă tuturor." else "Postarea a fost ascunsă din feed."
+    ) {
+        postRepository.setHidden(post.id, !post.hidden)
+        refreshStats()
+        null
+    }
+
+    /** Moderare: sterge postarea altcuiva; autorul primeste un mesaj. */
+    fun deleteAsModerator(post: Post) = runAdmin("Postarea a fost ștearsă. Autorul a primit un mesaj.") {
+        val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
+        postRepository.deletePost(post.id, admin.email, authorMessage = DEFAULT_AUTHOR_MESSAGE, moderation = true)
+        refreshStats()
+        null
+    }
+
     fun refreshUsers() {
         viewModelScope.launch {
             busy = true
@@ -61,8 +105,8 @@ class AdminViewModel(
         private set
 
     init {
-        // lista de utilizatori vine de pe server (rolurile si blocarea sunt pe server)
-        refreshUsers()
+        // utilizatorii, postarile si statisticile vin de pe server
+        refreshAll()
     }
 
     fun consumeMessage() {

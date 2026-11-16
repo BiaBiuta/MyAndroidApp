@@ -20,7 +20,8 @@ object Api {
     private val httpUrl = "http://$host/"
     val wsUrl = "ws://$host/"
 
-    private val gson = GsonBuilder()
+    // public: repository-ul citeste cu el si corpul erorilor (ex. postarea din raspunsul 409)
+    val gson = GsonBuilder()
         .registerTypeAdapter(Location::class.java, LocationDeserializer())
         .create()
 

@@ -1,11 +1,6 @@
 package com.example.myandroidapp.todo.ui.post
 
-import android.app.Application
-import android.content.Context
-import android.os.Build
 import android.util.Log
-import androidx.annotation.RequiresApi
-import androidx.compose.material3.DatePicker
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -14,193 +9,144 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import androidx.work.Constraints
-import androidx.work.Data
-import androidx.work.NetworkType
-import androidx.work.OneTimeWorkRequest
-import androidx.work.WorkManager
 import com.example.myandroidapp.MyApplication
+import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.auth.data.local.isGuest
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import com.example.myandroidapp.todo.data.Location
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
+import com.example.myandroidapp.todo.data.PostStatus
 import kotlinx.coroutines.launch
-import com.example.myandroidapp.core.Result
-import com.example.myandroidapp.core.TAG
-import com.example.myandroidapp.jobs.ServerWorker
-import com.example.myandroidapp.todo.data.Location
 
-import java.io.File
-
-
-data class PostUiState(
-    val postId:String?=null,
-    val post :Post = Post(),
-    var loadResult:Result<Post>?=null,
-    var submitResult:Result<Post>?=null
+/** Starea formularului "Postare nouă". */
+data class PostFormState(
+    val title: String = "",
+    val description: String = "",
+    // Base64 ("data:image/jpeg;base64,...") deja micsorat de PhotoEncoder; "" = fara poza
+    val photo: String = "",
+    val rating: Int = 0,
+    val visitDate: Long = System.currentTimeMillis(),
+    val location: Location? = null,
+    // ciorna: vizibila doar autorului, pana o publica
+    val isDraft: Boolean = false,
+    // postare privata: doar pe telefon, criptata, in sectiunea privata
+    val isPrivate: Boolean = false,
+    val saving: Boolean = false,
+    val error: String? = null,
+    // mesajul de dupa salvare (ex. "Salvată pe telefon..."); ecranul se inchide cand apare
+    val savedMessage: String? = null
 )
-class PostViewModel(private val postId: String?, private val itemRepository: PostRepository,private val application: Application) :
-    ViewModel() {
-    lateinit var workManager: WorkManager
-    var uiState: PostUiState by mutableStateOf(PostUiState(loadResult = Result.Loading))
+
+/**
+ * Postare noua. ViewModel-ul nu stie nimic de retea: PostRepository salveaza intai pe telefon
+ * si trimite la server (sau pune in coada daca serverul nu e disponibil).
+ */
+class PostViewModel(
+    private val postRepository: PostRepository,
+    private val roleRepository: RoleRepository
+) : ViewModel() {
+
+    var state by mutableStateOf(PostFormState())
         private set
 
-    init {
-        Log.d(TAG, "init")
-        if (postId != null) {
-            loadItem()
-        } else {
-            uiState = uiState.copy(loadResult = Result.Success(Post()))
-        }
-        workManager = WorkManager.getInstance(application)
+    fun onTitleChange(value: String) {
+        if (value.length <= MAX_TITLE) state = state.copy(title = value, error = null)
     }
 
-    fun loadItem() {
+    fun onDescriptionChange(value: String) {
+        if (value.length <= MAX_DESCRIPTION) state = state.copy(description = value, error = null)
+    }
+
+    fun onPhotoPicked(base64: String?) {
+        state = if (base64 == null) state.copy(error = "Poza nu a putut fi citită. Încercați alta.")
+        else state.copy(photo = base64, error = null)
+    }
+
+    fun onRatingChange(value: Int) {
+        state = state.copy(rating = value.coerceIn(0, 5))
+    }
+
+    fun onVisitDateChange(value: Long) {
+        state = state.copy(visitDate = value)
+    }
+
+    fun onLocationSelected(latitude: Double, longitude: Double) {
+        state = state.copy(location = Location(latitude, longitude))
+    }
+
+    fun onDraftChange(value: Boolean) {
+        state = state.copy(isDraft = value)
+    }
+
+    fun onPrivateChange(value: Boolean) {
+        state = state.copy(isPrivate = value)
+    }
+
+    fun save() {
+        val form = state
+        val title = form.title.trim()
+        val description = form.description.trim()
+        if (title.isEmpty() && description.isEmpty() && form.photo.isEmpty()) {
+            state = form.copy(error = "Adăugați cel puțin un titlu, un text sau o poză.")
+            return
+        }
         viewModelScope.launch {
-            itemRepository.itemStream.collect { posts ->
-                if (!(uiState.loadResult is Result.Loading)) {
-                    return@collect
+            state = state.copy(saving = true, error = null)
+            try {
+                // verificare si la salvare, nu doar in UI: doar USER publica postari
+                val user = roleRepository.currentUserOnce()
+                val reason = when {
+                    user == null -> "Conectați-vă pentru a publica postări."
+                    user.isAdmin -> "Administratorii nu pot publica postări."
+                    user.isGuest -> "Vizitatorii anonimi nu pot publica postări. Creați un cont."
+                    user.isBlocked -> RoleRepository.BLOCKED_MESSAGE
+                    else -> null
                 }
-
-                val post =posts.find { it.id==postId }?:Post()
-                uiState = uiState.copy(post = post, loadResult = Result.Success(post))
-
-            }
-            //val item = items.find { it.id == itemId } ?: Post()
-        }
-    }
-
-    private fun savePhotoToFile(context: Application, photoData: String): String {
-        val file = File(context.filesDir, "photo_${System.currentTimeMillis()}.txt")
-        file.writeText(photoData)
-        return file.absolutePath
-    }
-
-
-
-    @RequiresApi(Build.VERSION_CODES.O)
-    fun saveOrUpdateItem(photo:String, description:String, user_id:String, user_profile_photo:String, user_last_name:String, user_first_name:String, selectedLocation: Location) {
-
-        viewModelScope.launch {
-            Log.d(TAG, "saveOrUpdateItem...");
-            if (isAdmin()) return@launch
-            try {
-                uiState = uiState.copy(submitResult = Result.Loading)
-                val createdAt = java.util.Date().toInstant().toString() // Echivalent pentru new Date().toISOString() în JavaScript
-                val updatedAt = java.util.Date().toInstant().toString() // Data curentă pentru updated_at
-
-                val location = Location(selectedLocation.latitude,selectedLocation.longitude)
-                    ?: Location( 47.0,  48.0)
-                Log.d(TAG, "saveOrUpdateItem...location=${location.latitude},${location.longitude}");
-                val postId=uiState.postId
-                val item = uiState.post.copy(
-                    photo=photo?:"",
-                    description=description?:"",
-                    user_id=user_id?:"",
-                    user_profile_photo=user_profile_photo?:"",
-                    user_last_name=user_last_name?:"",
-                    user_first_name=user_first_name?:"",
-                    professional=false,
-                    created_at= createdAt,  // Consistent cu `updated_at`
-                    updated_at=updatedAt,
-                    //isNotSaved: Boolean=false,
-                    location=location
+                if (reason != null || user == null) {
+                    state = state.copy(saving = false, error = reason)
+                    return@launch
+                }
+                val post = Post(
+                    title = title,
+                    description = description,
+                    photo = form.photo,
+                    rating = form.rating,
+                    visit_date = form.visitDate,
+                    status = if (form.isDraft) PostStatus.DRAFT else PostStatus.ACTIVE,
+                    location = form.location ?: Location(),
+                    // ownerKey = id-ul de pe server; postarile proprii se recunosc dupa el
+                    user_id = user.ownerKey,
+                    user_first_name = user.email.substringBefore("@"),
+                    created_at = com.example.myandroidapp.core.isoNow()
                 )
-                val constraints = Constraints.Builder()
-
-                    .build()
-
-                val editPost=item.copy(id=postId?:"",createdAt)
-                val savedItem: Post;
-//                if (postId == null) {
-//                    savedItem = itemRepository.save(item)
-//                } else {
-//                    savedItem = itemRepository.update(editPost)
-//                }
-                val photoPath = savePhotoToFile(application, item.photo)
-
-
-
-
-                val inputData= Data.Builder()
-                    .putString("id",item.id)
-                    .putString("photoPath", photoPath)
-                    .putString("user_id",item.user_id)
-                    .putString("user_first_name",item.user_first_name)
-                    .putBoolean("isNotSaved",item.isNotSaved)
-                    .putString("description",item.description)
-                    .putDouble("latitudine",item.location.latitude)
-                    .putDouble("longitudine",item.location.longitude)
-                    .build()
-                val worker = OneTimeWorkRequest.Builder(ServerWorker::class.java)
-                    .setConstraints(constraints).setInputData(inputData).build()
-                workManager.enqueue(worker);
-                Log.d(TAG, "saveOrUpdateItem succeeeded");
-                uiState = uiState.copy(submitResult = Result.Success(item))
-            } catch (e: Exception) {
-                Log.d(TAG, "saveOrUpdateItem failed");
-                uiState = uiState.copy(submitResult = Result.Error(e))
-            }
-        }
-    }
-
-    /**
-     * Postare privata: se salveaza direct in baza locala (nu prin ServerWorker),
-     * deci nu ajunge niciodata pe server si nu o pot vedea alti utilizatori.
-     */
-    @RequiresApi(Build.VERSION_CODES.O)
-    fun savePrivatePost(photo: String, description: String, ownerKey: String, selectedLocation: Location) {
-        viewModelScope.launch {
-            if (isAdmin()) return@launch
-            try {
-                uiState = uiState.copy(submitResult = Result.Loading)
-                val now = java.util.Date().toInstant().toString()
-                val saved = itemRepository.savePrivate(
-                    Post(
-                        photo = photo,
-                        description = description,
-                        user_id = ownerKey,
-                        created_at = now,
-                        updated_at = now,
-                        location = Location(selectedLocation.latitude, selectedLocation.longitude),
-                        isPrivate = true
+                val message = if (form.isPrivate) {
+                    postRepository.savePrivate(post.copy(isPrivate = true))
+                    "Postarea a fost salvată în secțiunea privată."
+                } else {
+                    writeResultMessage(
+                        postRepository.createPost(post),
+                        if (form.isDraft) "Ciorna a fost salvată (o vezi doar tu)." else "Postarea a fost publicată."
                     )
-                )
-                Log.d(TAG, "savePrivatePost succeeded ${saved.id}")
-                uiState = uiState.copy(submitResult = Result.Success(saved))
+                }
+                state = state.copy(saving = false, savedMessage = message)
             } catch (e: Exception) {
-                Log.d(TAG, "savePrivatePost failed", e)
-                uiState = uiState.copy(submitResult = Result.Error(e))
+                Log.w(TAG, "save failed", e)
+                state = state.copy(saving = false, error = e.toUserMessage("Postarea nu a putut fi salvată."))
             }
         }
-    }
-
-    /**
-     * Verificare si la salvare, nu doar in UI: doar USER publica postari.
-     * Intoarce true (si marcheaza eroarea) daca utilizatorul curent NU are voie
-     * (administrator, vizitator anonim sau nicio sesiune).
-     */
-    private suspend fun isAdmin(): Boolean {
-        val user = (application as MyApplication).container.roleRepository.currentUserOnce()
-        val reason = when {
-            user == null -> "Conectați-vă pentru a publica postări."
-            user.isAdmin -> "Administratorii nu pot publica postări."
-            user.isGuest -> "Vizitatorii anonimi nu pot publica postări. Creați un cont."
-            else -> null
-        }
-        if (reason != null) {
-            uiState = uiState.copy(submitResult = Result.Error(IllegalStateException(reason)))
-            return true
-        }
-        return false
     }
 
     companion object {
-        fun Factory(itemId: String?): ViewModelProvider.Factory = viewModelFactory {
+        private const val TAG = "PostViewModel"
+        const val MAX_TITLE = 120
+        const val MAX_DESCRIPTION = 2000
+
+        val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
-                val app =
-                    (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
-                PostViewModel(itemId, app.container.postRepository,app)
+                val app = (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
+                PostViewModel(app.container.postRepository, app.container.roleRepository)
             }
         }
     }

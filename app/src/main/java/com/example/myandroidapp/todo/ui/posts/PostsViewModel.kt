@@ -29,6 +29,11 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.update
+import com.example.myandroidapp.todo.data.PostStatus
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
@@ -40,11 +45,48 @@ class PostsViewModel(
     private val postRepository: PostRepository,
     private val roleRepository: RoleRepository
 ) : ViewModel() {
-    val uiState: Flow<List<Post>> = postRepository.itemStream
-
     /** Contul logat, cu rolul lui (null = vizitator). */
     val currentUser: StateFlow<UserEntity?> = roleRepository.currentUser
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    /** Cautare si filtre (lista se recalculeaza la fiecare schimbare, fara cereri la server). */
+    data class Filters(
+        val query: String = "",
+        val mineOnly: Boolean = false,
+        // 0 = orice rating; 1..5 = cel putin atatea stele
+        val minRating: Int = 0
+    )
+
+    private val _filters = MutableStateFlow(Filters())
+    val filters: StateFlow<Filters> = _filters.asStateFlow()
+
+    fun onQueryChange(value: String) = _filters.update { it.copy(query = value) }
+    fun onMineOnlyChange(value: Boolean) = _filters.update { it.copy(mineOnly = value) }
+    fun onMinRatingChange(value: Int) = _filters.update { it.copy(minRating = value.coerceIn(0, 5)) }
+    fun clearFilters() = _filters.update { Filters() }
+
+    /**
+     * Feed-ul: postarile din Room (actualizate singur de server / WebSocket / sincronizare),
+     * filtrate dupa ce are voie sa vada contul curent si dupa cautare / filtre.
+     */
+    val uiState: Flow<List<Post>> = combine(postRepository.itemStream, currentUser, _filters) { posts, user, f ->
+        val me = user?.ownerKey
+        val words = normalize(f.query).split(' ').filter { it.isNotBlank() }
+        posts.filter { post ->
+            val mine = me != null && post.user_id == me
+            // ciornele le vede doar autorul; postarile ascunse de moderator: autorul si adminii
+            val visible = (post.status != PostStatus.DRAFT || mine) && (!post.hidden || mine || user?.isAdmin == true)
+            visible &&
+                    (!f.mineOnly || mine) &&
+                    (f.minRating == 0 || post.rating >= f.minRating) &&
+                    words.all { word -> normalize("${post.title} ${post.description}").contains(word) }
+        }
+    }
+
+    /** Pentru cautare: fara diacritice si fara majuscule ("Brașov" = "brasov"). */
+    private fun normalize(text: String): String =
+        java.text.Normalizer.normalize(text.lowercase(), java.text.Normalizer.Form.NFD)
+            .replace(Regex("\\p{Mn}+"), "")
 
     /** Id-urile postarilor raportate deja de utilizatorul curent. */
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -84,6 +126,10 @@ class PostsViewModel(
     init {
         Log.d(TAG, "init")
         loadItems()
+        // mesaje din sincronizarea din fundal (conflict, postare stearsa de moderator)
+        viewModelScope.launch {
+            postRepository.syncNotices.collect { message = it }
+        }
     }
 
     fun loadItems() {
@@ -124,12 +170,13 @@ class PostsViewModel(
                 // Adminul sterge postarea altcuiva -> autorul primeste un mesaj
                 val authorMessage = if (user.isAdmin && post.user_id != user.ownerKey)
                     AdminViewModel.DEFAULT_AUTHOR_MESSAGE else null
-                postRepository.deletePost(post.id, user.email, authorMessage)
-                message = "Postarea a fost ștearsă."
+                val result = postRepository.deletePost(post.id, user.email, authorMessage)
+                message = com.example.myandroidapp.todo.ui.post.writeResultMessage(result, "Postarea a fost ștearsă.")
             } catch (e: Exception) {
                 Log.w(TAG, "delete failed", e)
+                // doar moderarea (postarea altcuiva) cere conexiune; autorul poate sterge si offline
                 message = if (e is OfflineException)
-                    "Ești offline. Ștergerea are nevoie de conexiune la server."
+                    "Ești offline. Moderarea are nevoie de conexiune la server."
                 else e.toUserMessage("Postarea nu a putut fi ștearsă.")
             }
         }

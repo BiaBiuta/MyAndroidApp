@@ -266,3 +266,111 @@ test('datele raman dupa repornirea serverului', async () => {
   assert.equal(second.store.secret, app.store.secret);
   await second.close();
 });
+
+// ---------------------------------------------------------------------------
+// Sincronizare offline, ciorne, moderare
+// ---------------------------------------------------------------------------
+
+test('sincronizare: id generat pe telefon, PUT creeaza sau actualizeaza (upsert)', async () => {
+  const { token, user } = await signup('mara@example.com');
+  const id = '3f1c2a9e-1111-4c2b-9d7e-aaaaaaaaaaaa';
+  const created = await api('PUT', `/post/${id}`, {
+    token,
+    body: { title: 'Cheile Turzii', description: 'Superb', rating: 5, visit_date: 1763251200000, updated_at: new Date().toISOString() },
+  });
+  assert.equal(created.status, 201);
+  assert.equal(created.body.id, id);
+  assert.equal(created.body.user_id, String(user.id));
+  assert.equal(created.body.rating, 5);
+  assert.equal(created.body.status, 'ACTIVE');
+  // retrimiterea aceleiasi postari (ex. raspuns pierdut) nu o dubleaza
+  const again = await api('POST', '/post', { token, body: { id, title: 'Cheile Turzii' } });
+  assert.equal(again.status, 200);
+  const all = (await api('GET', '/posts', { token })).body.filter((p) => p.id === id);
+  assert.equal(all.length, 1);
+  // validari
+  assert.equal((await api('PUT', `/post/${id}`, { token, body: { rating: 7 } })).status, 400);
+  assert.equal((await api('PUT', `/post/${id}`, { token, body: { status: 'ALTCEVA' } })).status, 400);
+});
+
+test('conflict: castiga modificarea cea mai recenta (409 cu versiunea de pe server)', async () => {
+  const { token } = await signup('nora@example.com');
+  const id = 'aaaa1111-2222-4333-8444-555555555555';
+  const t0 = Date.now() - 60_000;
+  await api('PUT', `/post/${id}`, { token, body: { title: 'v1', updated_at: new Date(t0).toISOString() } });
+  // telefonul A editeaza mai tarziu
+  const newer = await api('PUT', `/post/${id}`, { token, body: { title: 'v2 (A)', updated_at: new Date(t0 + 20_000).toISOString() } });
+  assert.equal(newer.status, 200);
+  // telefonul B trimite o editare facuta INAINTE (offline) -> refuzata
+  const older = await api('PUT', `/post/${id}`, { token, body: { title: 'v2 (B)', updated_at: new Date(t0 + 10_000).toISOString() } });
+  assert.equal(older.status, 409);
+  assert.equal(older.body.item.title, 'v2 (A)');
+});
+
+test('stergere: 410 la editarea unei postari sterse (si de moderator); DELETE repetat e succes', async () => {
+  const author = await signup('olga@example.com');
+  const admin = (await api('POST', '/login', { body: { email: 'admin@wanderlog.ro', password: STRONG } })).body;
+  const id = 'bbbb1111-2222-4333-8444-555555555555';
+  await api('PUT', `/post/${id}`, { token: author.token, body: { title: 'De moderat' } });
+  assert.equal((await api('DELETE', `/post/${id}`, { token: admin.token })).status, 204);
+  const edit = await api('PUT', `/post/${id}`, { token: author.token, body: { title: 'editata offline' } });
+  assert.equal(edit.status, 410);
+  assert.equal(edit.body.removedBy, 'MODERATOR');
+  assert.equal((await api('DELETE', `/post/${id}`, { token: author.token })).status, 204);
+});
+
+test('ciorne si postari ascunse: cine ce vede', async () => {
+  const author = await signup('paula@example.com');
+  const other = await signup('radu@example.com');
+  const admin = (await api('POST', '/login', { body: { email: 'admin@wanderlog.ro', password: STRONG } })).body;
+  const draft = (await api('POST', '/post', { token: author.token, body: { title: 'Ciorna', status: 'DRAFT' } })).body;
+  const pub = (await api('POST', '/post', { token: author.token, body: { title: 'Publica' } })).body;
+
+  const ids = async (token) => (await api('GET', '/posts', { token })).body.map((p) => p.id);
+  assert.ok((await ids(author.token)).includes(draft.id), 'autorul isi vede ciorna');
+  assert.ok(!(await ids(other.token)).includes(draft.id), 'altii nu vad ciorna');
+  assert.ok(!(await ids(admin.token)).includes(draft.id), 'nici adminul nu vede ciornele');
+
+  // ascunsa de admin: dispare din feed, ramane pentru autor si admin
+  assert.equal((await api('PATCH', `/post/${pub.id}/visibility`, { token: other.token, body: { hidden: true } })).status, 403);
+  const hidden = await api('PATCH', `/post/${pub.id}/visibility`, { token: admin.token, body: { hidden: true } });
+  assert.equal(hidden.body.hidden, true);
+  assert.ok(!(await ids(other.token)).includes(pub.id));
+  assert.ok((await ids(author.token)).includes(pub.id));
+  assert.ok((await ids(admin.token)).includes(pub.id));
+  await api('PATCH', `/post/${pub.id}/visibility`, { token: admin.token, body: { hidden: false } });
+  assert.ok((await ids(other.token)).includes(pub.id), 'reafisata');
+});
+
+test('statistici: doar admin', async () => {
+  const admin = (await api('POST', '/login', { body: { email: 'admin@wanderlog.ro', password: STRONG } })).body;
+  const user = await signup('sara@example.com');
+  assert.equal((await api('GET', '/stats', { token: user.token })).status, 403);
+  const stats = await api('GET', '/stats', { token: admin.token });
+  assert.equal(stats.status, 200);
+  assert.ok(stats.body.users.total >= 1);
+  assert.ok(typeof stats.body.posts.drafts === 'number');
+  assert.ok(stats.body.posts.deletedByModerators >= 1);
+});
+
+test('WebSocket: ciorna ajunge doar la autor; ceilalti primesc "deleted" cand o postare devine invizibila', async () => {
+  const author = await signup('tudor@example.com');
+  const other = await signup('vlad@example.com');
+  const listen = async (token) => {
+    const ws = new WebSocket(wsUrl);
+    const events = [];
+    await new Promise((r) => (ws.onopen = r));
+    ws.onmessage = (m) => events.push(JSON.parse(m.data));
+    ws.send(JSON.stringify({ type: 'authorization', payload: { token } }));
+    await new Promise((r) => setTimeout(r, 80));
+    return { ws, events };
+  };
+  const a = await listen(author.token);
+  const o = await listen(other.token);
+  const draft = (await api('POST', '/post', { token: author.token, body: { title: 'secret', status: 'DRAFT' } })).body;
+  await new Promise((r) => setTimeout(r, 150));
+  a.ws.close();
+  o.ws.close();
+  assert.equal(a.events.find((e) => e.payload.item.id === draft.id).event, 'created');
+  assert.equal(o.events.find((e) => e.payload.item.id === draft.id).event, 'deleted');
+});

@@ -57,7 +57,7 @@ class ServerWorker(
                 val result = itemRepository.createPost(item.copy(isNotSaved = false))
                 Log.d("ServerWorker", "postare noua: $result")
             } else {
-                itemRepository.update(item.copy(isNotSaved = false))
+                itemRepository.updatePost(item)
             }
             Result.success()
         } catch (e: Exception) {

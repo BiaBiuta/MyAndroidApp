@@ -16,8 +16,8 @@ class NetworkChangeReceiver : BroadcastReceiver() {
         if (isOnline(context)) {
             Log.d(TAG,"sunt online")
             // Pornește un worker pentru a sincroniza datele salvate local
-            val syncWork = OneTimeWorkRequest.Builder(SyncWorker::class.java).build()
-            WorkManager.getInstance(context).enqueue(syncWork)
+            // sincronizarea din coada: unica, cu retea, reluata automat (SyncScheduler)
+            com.example.myandroidapp.jobs.SyncScheduler.schedule(context)
         }
     }
 

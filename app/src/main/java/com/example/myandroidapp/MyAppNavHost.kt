@@ -16,6 +16,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -27,6 +30,7 @@ import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import android.net.Uri
 import androidx.navigation.compose.rememberNavController
+import androidx.navigation.compose.currentBackStackEntryAsState
 import com.example.myandroidapp.auth.LoginScreen
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.todo.ui.post.PostAddScreen
@@ -216,6 +220,19 @@ fun MyAppNavHost() {
                 }
             }
             else -> {}
+        }
+    }
+
+    // Adminul intra direct in ecranul de moderare (o data pe sesiune); cu "Înapoi" ajunge in feed.
+    val activeToken = (sessionState as? SessionState.Active)?.token
+    var adminLandedFor by rememberSaveable { mutableStateOf<String?>(null) }
+    val currentRoute = navController.currentBackStackEntryAsState().value?.destination?.route
+    LaunchedEffect(activeToken, currentUser?.isAdmin, currentRoute) {
+        if (activeToken != null && currentUser?.isAdmin == true && adminLandedFor != activeToken &&
+            currentRoute == postsRoute
+        ) {
+            adminLandedFor = activeToken
+            navController.navigate(adminRoute)
         }
     }
 

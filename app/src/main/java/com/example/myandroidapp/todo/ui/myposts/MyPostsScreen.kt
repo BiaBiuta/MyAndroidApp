@@ -78,13 +78,12 @@ class MyPostsViewModel(
                 return@launch
             }
             try {
-                postRepository.deletePost(post.id, user.email)
-                message = "Postarea a fost ștearsă."
+                // si offline: postarea dispare imediat, se sterge pe server la sincronizare
+                val result = postRepository.deletePost(post.id, user.email)
+                message = com.example.myandroidapp.todo.ui.post.writeResultMessage(result, "Postarea a fost ștearsă.")
             } catch (e: Exception) {
                 Log.w("MyPostsViewModel", "delete failed", e)
-                message = if (e is OfflineException)
-                    "Ești offline. Ștergerea are nevoie de conexiune la server."
-                else e.toUserMessage("Postarea nu a putut fi ștearsă.")
+                message = e.toUserMessage("Postarea nu a putut fi ștearsă.")
             }
         }
     }
@@ -151,6 +150,8 @@ fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}) {
                         posts = posts,
                         onPostClick = {},
                         modifier = Modifier.fillMaxSize(),
+                        // toate sunt ale utilizatorului: se vede starea sincronizarii fiecareia
+                        isOwn = { true },
                         actions = { post ->
                             PostRoleActions(
                                 canDelete = true,

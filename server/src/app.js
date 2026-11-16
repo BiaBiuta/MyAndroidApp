@@ -172,8 +172,20 @@ function createApp(options = {}) {
   );
 
   // ---------------------------------------------------------------------------
-  // Postari (CRUD)
+  // Postari (CRUD + sincronizare offline)
+  //
+  //  - id-ul postarii poate fi generat pe telefon (UUID), deci o postare creata offline
+  //    are acelasi id peste tot; PUT /post/:id creeaza SAU actualizeaza (upsert), asa ca
+  //    sincronizarea trimite acelasi apel indiferent daca postarea exista deja pe server;
+  //  - conflicte: castiga modificarea cea mai recenta (updated_at); una mai veche primeste 409
+  //    cu versiunea de pe server;
+  //  - o postare stearsa (de autor sau de moderator) raspunde 410 la editare, ca telefonul
+  //    sa nu o recreeze din coada offline;
+  //  - DRAFT: vizibila doar autorului; ascunsa de admin (hidden): vizibila autorului si adminilor.
   // ---------------------------------------------------------------------------
+
+  const STATUSES = ['ACTIVE', 'DRAFT'];
+  const ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
 
   /** Locatia vine ca obiect {latitude, longitude} sau ca text "lat,lng"; o pastram ca text. */
   function normalizeLocation(location) {
@@ -192,71 +204,157 @@ function createApp(options = {}) {
   }
 
   function validatePostInput(body) {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
     const description = typeof body.description === 'string' ? body.description.trim() : '';
     const photo = typeof body.photo === 'string' ? body.photo : '';
-    if (!description && !photo) throw new ApiError(400, 'Postarea trebuie să aibă un text sau o poză.');
+    if (!title && !description && !photo) {
+      throw new ApiError(400, 'Postarea trebuie să aibă un titlu, un text sau o poză.');
+    }
+    if (title.length > 120) throw new ApiError(400, 'Titlul poate avea cel mult 120 de caractere.');
     if (description.length > 2000) throw new ApiError(400, 'Textul postării poate avea cel mult 2000 de caractere.');
     // aplicatia micsoreaza pozele (~350 KB); limita protejeaza baza de date de pe telefoane
     // (SQLite pe Android nu poate citi un rand mai mare de ~2 MB)
     if (photo.length > 1_000_000) throw new ApiError(413, 'Poza este prea mare. Alegeți o poză mai mică.');
-    return { description, photo, location: normalizeLocation(body.location) };
+    const rating = Number(body.rating ?? 0);
+    if (!Number.isInteger(rating) || rating < 0 || rating > 5) {
+      throw new ApiError(400, 'Ratingul trebuie să fie între 1 și 5 stele.');
+    }
+    const visitDate = Number(body.visit_date ?? 0);
+    if (!Number.isFinite(visitDate) || visitDate < 0) throw new ApiError(400, 'Data vizitei nu este validă.');
+    const status = body.status === undefined || body.status === null || body.status === '' ? 'ACTIVE' : body.status;
+    if (!STATUSES.includes(status)) throw new ApiError(400, 'Starea postării trebuie să fie ACTIVE sau DRAFT.');
+    return { title, description, photo, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
+  }
+
+  /** Ce vede un utilizator: postarile active si neascunse; ale lui oricum; adminul si pe cele ascunse. */
+  function canSee(post, user) {
+    if (!user) return false;
+    if (post.user_id === String(user.id)) return true;
+    if (post.status === 'DRAFT') return false;
+    return !post.hidden || user.role === 'ADMIN';
+  }
+
+  /** Anunta prin WebSocket fiecare client cu ce poate vedea (altfel "deleted", ca sa o scoata din lista). */
+  function broadcastPost(event, post) {
+    hub.broadcastWith((viewer) => {
+      if (event === 'deleted' || !canSee(post, viewer)) return { event: 'deleted', payload: { item: post } };
+      return { event, payload: { item: post } };
+    });
   }
 
   function requireAuthor(post, user) {
     if (post.user_id !== String(user.id)) throw new ApiError(403, 'Puteți modifica doar postările proprii.');
   }
 
-  function findPostOr404(id) {
+  function requirePublisher(user) {
+    // doar USER publica: adminul modereaza, vizitatorul anonim doar citeste (ca in aplicatie)
+    if (user.role !== 'USER' || user.provider === PROVIDERS.ANONYMOUS) {
+      throw new ApiError(403, user.role === 'ADMIN'
+        ? 'Administratorii nu pot publica postări.'
+        : 'Vizitatorii anonimi nu pot publica postări. Creați un cont.');
+    }
+  }
+
+  function findVisiblePostOr404(id, user) {
     const post = store.findPost(id);
-    if (!post) throw new ApiError(404, 'Postarea nu mai există. Poate a fost ștearsă între timp.');
+    if (!post || !canSee(post, user)) throw new ApiError(404, 'Postarea nu mai există. Poate a fost ștearsă între timp.');
     return post;
   }
 
-  router.add('GET', '/posts', () => ({ status: 200, body: store.listPosts() }), { auth: true });
+  function goneError(id) {
+    const tombstone = store.findTombstone(id);
+    return new ApiError(
+      410,
+      tombstone && tombstone.byModerator
+        ? 'Această postare a fost ștearsă de un moderator.'
+        : 'Această postare a fost ștearsă.',
+      { removedBy: tombstone && tombstone.byModerator ? 'MODERATOR' : 'OWNER' },
+    );
+  }
 
-  router.add('GET', '/post/:id', ({ params }) => ({ status: 200, body: findPostOr404(params.id) }), { auth: true });
+  /** Data unei modificari trimise de telefon (momentul editarii, si offline); nu in viitor. */
+  function editTime(value) {
+    const time = Date.parse(value);
+    const now = Date.now();
+    return new Date(Number.isFinite(time) ? Math.min(time, now) : now).toISOString();
+  }
 
+  function createPost(id, input, user, updatedAt) {
+    const now = new Date().toISOString();
+    const post = {
+      id,
+      ...input,
+      hidden: false,
+      // autorul vine din token, nu din ce trimite aplicatia
+      user_id: String(user.id),
+      user_profile_photo: '',
+      user_last_name: '',
+      user_first_name: user.email.split('@')[0],
+      professional: false,
+      created_at: now,
+      updated_at: updatedAt || now,
+    };
+    store.insertPost(post);
+    broadcastPost('created', post);
+    return post;
+  }
+
+  router.add(
+    'GET',
+    '/posts',
+    ({ user }) => ({ status: 200, body: store.listPosts().filter((p) => canSee(p, user)) }),
+    { auth: true },
+  );
+
+  router.add('GET', '/post/:id', ({ params, user }) => ({ status: 200, body: findVisiblePostOr404(params.id, user) }), {
+    auth: true,
+  });
+
+  /** Postare noua. Telefonul poate trimite propriul id (UUID); retrimiterea aceluiasi id nu dubleaza postarea. */
   router.add(
     'POST',
     '/post',
     ({ body, user }) => {
-      // doar USER publica: adminul modereaza, vizitatorul anonim doar citeste (ca in aplicatie)
-      if (user.role !== 'USER' || user.provider === PROVIDERS.ANONYMOUS) {
-        throw new ApiError(403, user.role === 'ADMIN'
-          ? 'Administratorii nu pot publica postări.'
-          : 'Vizitatorii anonimi nu pot publica postări. Creați un cont.');
-      }
+      requirePublisher(user);
       const input = validatePostInput(body);
-      const now = new Date().toISOString();
-      const post = {
-        id: crypto.randomUUID(),
-        ...input,
-        // autorul vine din token, nu din ce trimite aplicatia
-        user_id: String(user.id),
-        user_profile_photo: '',
-        user_last_name: '',
-        user_first_name: user.email.split('@')[0],
-        professional: false,
-        created_at: now,
-        updated_at: now,
-      };
-      store.insertPost(post);
-      hub.broadcast('created', post);
-      return { status: 201, body: post };
+      const id = typeof body.id === 'string' && ID_PATTERN.test(body.id) ? body.id : crypto.randomUUID();
+      if (store.findTombstone(id)) throw goneError(id);
+      const existing = store.findPost(id);
+      if (existing) {
+        requireAuthor(existing, user);
+        return { status: 200, body: existing }; // trimisa deja (ex. raspunsul s-a pierdut pe drum)
+      }
+      return { status: 201, body: createPost(id, input, user, editTime(body.updated_at)) };
     },
     { auth: true },
   );
 
+  /** Creeaza sau actualizeaza (upsert), cu "ultima modificare castiga". */
   router.add(
     'PUT',
     '/post/:id',
     ({ params, body, user }) => {
-      const existing = findPostOr404(params.id);
+      if (!ID_PATTERN.test(params.id)) throw new ApiError(400, 'Identificator de postare invalid.');
+      if (store.findTombstone(params.id)) throw goneError(params.id);
+      const existing = store.findPost(params.id);
+      const updatedAt = editTime(body.updated_at);
+
+      if (!existing) {
+        requirePublisher(user);
+        return { status: 201, body: createPost(params.id, validatePostInput(body), user, updatedAt) };
+      }
+
       requireAuthor(existing, user);
+      if (Date.parse(updatedAt) < Date.parse(existing.updated_at)) {
+        // pe alt dispozitiv s-a facut o modificare mai noua: o pastram pe aceea
+        throw new ApiError(409, 'Această postare a fost modificată pe alt dispozitiv. Se păstrează varianta mai nouă.', {
+          item: existing,
+        });
+      }
       const input = validatePostInput({ ...existing, ...body });
-      const updated = { ...existing, ...input, updated_at: new Date().toISOString() };
+      const updated = { ...existing, ...input, updated_at: updatedAt };
       store.replacePost(updated);
-      hub.broadcast('updated', updated);
+      broadcastPost('updated', updated);
       return { status: 200, body: updated };
     },
     { auth: true },
@@ -266,11 +364,65 @@ function createApp(options = {}) {
     'DELETE',
     '/post/:id',
     ({ params, user }) => {
-      const existing = findPostOr404(params.id);
+      const existing = store.findPost(params.id);
+      if (!existing) {
+        if (store.findTombstone(params.id)) return { status: 204 }; // deja stearsa: succes
+        throw new ApiError(404, 'Postarea nu mai există.');
+      }
+      const isOwner = existing.user_id === String(user.id);
       if (user.role !== 'ADMIN') requireAuthor(existing, user);
-      store.deletePost(existing.id);
-      hub.broadcast('deleted', existing);
+      store.deletePost(existing.id, { byModerator: !isOwner });
+      broadcastPost('deleted', existing);
       return { status: 204 };
+    },
+    { auth: true },
+  );
+
+  // ---------------------------------------------------------------------------
+  // Moderare (doar ADMIN): ascunde / reafiseaza o postare, statistici
+  // ---------------------------------------------------------------------------
+
+  router.add(
+    'PATCH',
+    '/post/:id/visibility',
+    ({ params, body, user }) => {
+      requireAdmin(user);
+      if (typeof body.hidden !== 'boolean') throw new ApiError(400, 'Câmpul „hidden” trebuie să fie true sau false.');
+      const existing = store.findPost(params.id);
+      if (!existing || existing.status === 'DRAFT') throw new ApiError(404, 'Postarea nu mai există.');
+      const updated = { ...existing, hidden: body.hidden };
+      store.replacePost(updated);
+      broadcastPost('updated', updated);
+      return { status: 200, body: updated };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'GET',
+    '/stats',
+    ({ user }) => {
+      requireAdmin(user);
+      const users = store.listUsers();
+      const posts = store.listPosts();
+      return {
+        status: 200,
+        body: {
+          users: {
+            total: users.length,
+            active: users.filter((u) => !u.blocked).length,
+            blocked: users.filter((u) => u.blocked).length,
+            admins: users.filter((u) => u.role === 'ADMIN').length,
+          },
+          posts: {
+            total: posts.length,
+            active: posts.filter((p) => p.status !== 'DRAFT' && !p.hidden).length,
+            drafts: posts.filter((p) => p.status === 'DRAFT').length,
+            hidden: posts.filter((p) => p.hidden).length,
+            deletedByModerators: store.countTombstones({ byModerator: true }),
+          },
+        },
+      };
     },
     { auth: true },
   );

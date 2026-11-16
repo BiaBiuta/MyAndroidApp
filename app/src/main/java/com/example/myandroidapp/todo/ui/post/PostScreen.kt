@@ -1,282 +1,189 @@
 package com.example.myandroidapp.todo.ui.post
 
-import MyLocationViewModel
-import android.app.Application
 import android.content.ContentResolver
-import android.media.RingtoneManager
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
-import android.util.Base64
-import android.util.Log
-import androidx.activity.compose.setContent
+import android.widget.Toast
 import androidx.activity.ComponentActivity
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.annotation.RequiresApi
-import androidx.compose.foundation.Image
-import androidx.compose.foundation.border
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.text.BasicTextField
-import androidx.compose.material.*
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
-import androidx.compose.runtime.*
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
-import androidx.core.app.NotificationCompat
-import androidx.core.app.NotificationManagerCompat
 import androidx.lifecycle.viewmodel.compose.viewModel
-import coil.compose.rememberAsyncImagePainter
-import com.example.myandroidapp.R
-import com.example.myandroidapp.auth.data.remote.User
-import com.example.myandroidapp.core.Result
-import com.example.myandroidapp.core.TAG
-import com.example.myandroidapp.core.data.UserPreferences
-import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.maps.MyLocation
-
-import com.example.myandroidapp.maps.MyMap
-import com.example.myandroidapp.todo.data.Location
-import com.example.myapplication.core.userPreferencesDataStore
-import com.example.myapplication.notifications.createNotificationChannel
-import com.example.myapplication.notifications.showSimpleNotification
-import com.google.android.gms.maps.model.CameraPosition
-import com.google.android.gms.maps.model.LatLng
-import com.google.maps.android.compose.GoogleMap
-import com.google.maps.android.compose.Marker
-import com.google.maps.android.compose.MarkerState
-import com.google.maps.android.compose.rememberCameraPositionState
-import com.google.maps.android.compose.rememberMarkerState
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
-import kotlinx.serialization.json.JsonNull.content
-import java.io.InputStream
-import androidx.compose.runtime.rememberCoroutineScope as rememberCoroutineScope1
+import com.example.myandroidapp.notifications.createNotificationChannel
+import com.example.myandroidapp.notifications.showSimpleNotification
 
 class PostAddActivity : ComponentActivity() {
-    @RequiresApi(Build.VERSION_CODES.O)
-    override fun onCreate(savedInstanceState: Bundle?,) {
+    override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        setContent {
-            PostAddScreen(
-                onClose = {  }
-            )
-        }
+        setContent { PostAddScreen(onClose = { finish() }) }
     }
 }
 
-@RequiresApi(Build.VERSION_CODES.O)
+private const val CHANNEL_ID = "MyTestChannel"
+
+/**
+ * Postare noua: titlu, text, poza (galerie sau camera), rating, data vizitei, locatia pe harta,
+ * ciorna (vizibila doar autorului) sau postare privata (doar pe telefon, criptata).
+ * Salvarea merge si fara internet: postarea apare imediat ("Pending") si se trimite singura.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
-    val postViewModel = viewModel<PostViewModel>(factory = PostViewModel.Factory(""))
-    // Postare privata = salvata doar local, vizibila doar proprietarului in sectiunea privata
-    var isPrivate by rememberSaveable { mutableStateOf(isPrivateInitially) }
-    // Proprietarul postarii: id-ul de pe server sau e-mail-ul (sesiune locala)
-    var ownerKey by rememberSaveable { mutableStateOf("") }
-    val postUiState=postViewModel.uiState
-    var photoUri by remember { mutableStateOf<Uri?>(null) }
-    var photoPath by rememberSaveable { mutableStateOf("") }
-    var description by rememberSaveable { mutableStateOf("") }
-    var selectedLocation by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
-    var saving by rememberSaveable { mutableStateOf(false) }
-    var savingError by rememberSaveable { mutableStateOf<String?>(null) }
+    val viewModel = viewModel<PostViewModel>(factory = PostViewModel.Factory)
+    val state = viewModel.state
     val context = LocalContext.current
-    val scope = rememberCoroutineScope1() // Gestionăm corutinele dintr-un context Compose
-    val userPreferencesRepository = UserPreferencesRepository(
-        dataStore = context.userPreferencesDataStore
-    )
-    val myLocationViewModel = viewModel<MyLocationViewModel>(
-        factory = MyLocationViewModel.Factory(
-            LocalContext.current.applicationContext as Application
-        )
-    )
-    var user by rememberSaveable { mutableStateOf<User>(User("","",0)) }
-    val markerState = rememberMarkerState(
-        position = LatLng(selectedLocation?.first ?: 0.0, selectedLocation?.second ?: 0.0)
-    )
-    val cameraPositionState = rememberCameraPositionState {
-        position = CameraPosition.fromLatLngZoom(markerState.position, 10f)
-    }
 
     LaunchedEffect(Unit) {
-        scope.launch {
-            user = userPreferencesRepository.getUser()?:User("","",0)
-            ownerKey = userPreferencesRepository.userPreferencesStream.first().ownerKey
+        if (isPrivateInitially) viewModel.onPrivateChange(true)
+        createNotificationChannel(CHANNEL_ID, context)
+    }
+    // dupa salvare: mesajul (publicata / in coada / privata), apoi inapoi la lista
+    LaunchedEffect(state.savedMessage) {
+        val message = state.savedMessage ?: return@LaunchedEffect
+        Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+        if (!state.isPrivate && !state.isDraft) {
+            showSimpleNotification(context, CHANNEL_ID, 1, "Postare nouă", state.title.ifBlank { "Ai adăugat o postare" })
         }
+        onClose()
     }
-    val selectImageLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: Uri? ->
-        photoUri = uri
-        photoPath = uri?.toString() ?: "" // Convertim Uri la string
-    }
-    var textInitialized by remember { mutableStateOf("") }
 
-    LaunchedEffect (postUiState.submitResult){
-        Log.d("ItemScreen", "Submit = ${postUiState.submitResult}");
-        if(postUiState.submitResult is Result.Success){
-            Log.d("ItemScreen", "Closing screen");
-            onClose();
-        }
-    }
-    //val context = LocalContext.current
-    val channelId = "MyTestChannel"
-    var notificationId = 0
-
-    LaunchedEffect(Unit) {
-        createNotificationChannel(channelId, context)
-        Log.d(TAG,"am creat notification channel")
-
-    }
     Scaffold(
         topBar = {
-            TopAppBar(title = { Text("Add New Post") })
+            TopAppBar(
+                title = { Text(if (state.isPrivate) "Postare privată nouă" else "Postare nouă") },
+                navigationIcon = {
+                    IconButton(onClick = onClose) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Înapoi")
+                    }
+                }
+            )
         }
-    ) { paddingValues ->
+    ) { padding ->
         Column(
             modifier = Modifier
-                .padding(paddingValues)
+                .padding(padding)
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
                 .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Photo Selector
-            Button(onClick = {
-                selectImageLauncher.launch("image/*")
-            }) {
-                Text("Select Photo")
-            }
-
-            photoUri?.let {
-                Image(
-                    painter = rememberAsyncImagePainter(it),
-                    contentDescription = "Selected Image",
-                    modifier = Modifier
-                        .size(150.dp)
-                        .border(1.dp, Color.Gray)
-                )
-                //Text("Photo Path: $photoPath") // Afișează calea imaginii
-            }
-
-            // Description Input
-            BasicTextField(
-                value = description,
-                onValueChange = { description = it },
-                textStyle = TextStyle(color = Color.Black),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(100.dp)
-                    .border(1.dp, Color.Gray)
-                    .padding(8.dp)
+            OutlinedTextField(
+                value = state.title,
+                onValueChange = viewModel::onTitleChange,
+                label = { Text("Titlu / destinație") },
+                placeholder = { Text("ex. Cheile Turzii") },
+                singleLine = true,
+                enabled = !state.saving,
+                supportingText = { Text("${state.title.length}/${PostViewModel.MAX_TITLE}") },
+                modifier = Modifier.fillMaxWidth()
             )
+            OutlinedTextField(
+                value = state.description,
+                onValueChange = viewModel::onDescriptionChange,
+                label = { Text("Impresii") },
+                minLines = 3,
+                enabled = !state.saving,
+                supportingText = { Text("${state.description.length}/${PostViewModel.MAX_DESCRIPTION}") },
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            PhotoPickerField(photo = state.photo, enabled = !state.saving, onPhotoPicked = viewModel::onPhotoPicked)
+            RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
+            VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
+
+            Text("Locația", style = MaterialTheme.typography.labelLarge)
             MyLocation(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(300.dp) ,
-                onLocationSelected = { lat, lon ->
-                    Log.d("PostAdd", "Actualizez Location: $lat, $lon")
-                    selectedLocation = Pair(lat, lon) // Actualizează coordonatele selectate
-                }
+                    .height(260.dp),
+                onLocationSelected = viewModel::onLocationSelected
             )
-//            Button(onClick = {
-//                selectedLocation = Pair(
-//                    myLocationViewModel.uiState?.latitude ?: 0.0,
-//                    myLocationViewModel.uiState?.longitude ?: 0.0
-//                )
-//            }) {
-//                //Text("Save Current Location")
-//            }
-
-            selectedLocation?.let {
-                Log.d("PostAdd", "Selected Location: ${it.first}, ${it.second}")
-                //Text("Selected Location: ${it.first}, ${it.second}")
+            state.location?.let {
+                Text(
+                    "Locația aleasă: %.4f, %.4f".format(it.latitude, it.longitude),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
             }
 
+            HorizontalDivider()
+            LabeledSwitch(
+                title = "Ciornă",
+                description = if (state.isDraft) "O vezi doar tu; o publici mai târziu din editare"
+                else "Publicată în lista tuturor",
+                checked = state.isDraft,
+                enabled = !state.saving && !state.isPrivate,
+                onCheckedChange = viewModel::onDraftChange
+            )
+            LabeledSwitch(
+                title = "Postare privată",
+                description = if (state.isPrivate) "Doar pe acest telefon, criptată, în secțiunea privată"
+                else "Ajunge pe server și se sincronizează",
+                checked = state.isPrivate,
+                enabled = !state.saving,
+                onCheckedChange = viewModel::onPrivateChange
+            )
 
-
-            val locationToSave = selectedLocation?.let {
-                Location(it.first, it.second)
-
-            } ?: Location()
-
-            // Publica / privata (doar pentru utilizatorii cu cont; vizitatorii nu au sectiune privata)
-            if (ownerKey.isNotEmpty()) Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text("Postare privată")
-                    Text(
-                        if (isPrivate) "Vizibilă doar ție, în secțiunea privată"
-                        else "Vizibilă tuturor în lista de postări",
-                        color = Color.Gray
-                    )
-                }
-                Switch(checked = isPrivate, onCheckedChange = { isPrivate = it })
+            state.error?.let {
+                Text(
+                    it,
+                    color = MaterialTheme.colorScheme.error,
+                    modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                )
             }
 
-            // Save Button
-            Button(onClick = {
-                saving = true
-                savingError = null
-                photoUri?.let { uri ->
-                    scope.launch {
-                        Log.d("PostAdd", "Location to save: $locationToSave")
-                        val base64Image = convertImageToBase64(context.contentResolver, uri)
-                        if (base64Image == null) {
-                            savingError = "Eroare la conversia imaginii"
-                        } else if (isPrivate && ownerKey.isNotEmpty()) {
-                            // doar local, legata de proprietar; nu trece prin server
-                            postViewModel.savePrivatePost(base64Image, description, ownerKey, locationToSave)
-                        } else {
-                            // user_id = ownerKey (id-ul de pe server sau e-mailul pentru sesiunile locale),
-                            // ca "Postările mele" si stergerea postarilor proprii sa functioneze pentru orice cont
-                            postViewModel.saveOrUpdateItem(base64Image, description, ownerKey.ifEmpty { user.id.toString() }, "","", user.email.substringBefore("@"), locationToSave)
-                            Log.d("PostAdd", "Saving post with description=$description, location=$selectedLocation")
-                        }
-                        saving = false
+            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(onClick = onClose, enabled = !state.saving) { Text("Anulează") }
+                Spacer(Modifier.width(8.dp))
+                Button(onClick = viewModel::save, enabled = !state.saving) {
+                    if (state.saving) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(18.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.onPrimary
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text("Se salvează…")
+                    } else {
+                        Text(if (state.isDraft && !state.isPrivate) "Salvează ciorna" else "Salvează")
                     }
                 }
-                if (!(isPrivate && ownerKey.isNotEmpty())) {
-                    showSimpleNotification(
-                        context,
-                        channelId,
-                        notificationId,
-                        "Post add",
-                        "${user.id} add a post"
-                    )
-                    notificationId += 1
-                }
-            }) {
-                Text("Save Post")
             }
-            savingError?.let { Text(it, color = Color.Red) }
-
-            // Loading Indicator
-            if (postUiState.loadResult is Result.Loading) {
-                CircularProgressIndicator()
-                return@Scaffold
-            }
-            if (postUiState.submitResult is Result.Loading) {
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalAlignment = Alignment.CenterHorizontally
-                ) { LinearProgressIndicator() }
-            }
-
+            Spacer(Modifier.height(8.dp))
         }
     }
 }

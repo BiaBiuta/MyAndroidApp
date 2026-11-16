@@ -50,7 +50,8 @@ class AppContainer(val context: Context) {
             postWsClient,
             database.itemDao(),
             database.moderationDao(),
-            currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey }
+            currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
+            scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
         )
     }
 

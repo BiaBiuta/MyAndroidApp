@@ -1,14 +1,6 @@
 package com.example.myandroidapp.todo.ui.edit
 
-import com.example.myandroidapp.core.data.remote.toUserMessage
-import com.example.myandroidapp.core.data.remote.OfflineException
-import android.graphics.BitmapFactory
-import android.net.Uri
-import android.util.Base64
 import android.util.Log
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,13 +13,15 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -41,14 +35,12 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.asImageBitmap
-import androidx.compose.ui.layout.ContentScale
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
@@ -56,12 +48,18 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import coil.compose.rememberAsyncImagePainter
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
+import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.todo.data.PostRepository
-import com.example.myandroidapp.todo.ui.post.convertImageToBase64
+import com.example.myandroidapp.todo.data.PostStatus
+import com.example.myandroidapp.todo.data.SyncStatus
+import com.example.myandroidapp.todo.ui.post.LabeledSwitch
+import com.example.myandroidapp.todo.ui.post.PhotoPickerField
+import com.example.myandroidapp.todo.ui.post.RatingField
+import com.example.myandroidapp.todo.ui.post.VisitDateField
+import com.example.myandroidapp.todo.ui.post.writeResultMessage
 import kotlinx.coroutines.launch
 
 /** Starea ecranului de editare. */
@@ -70,17 +68,22 @@ data class EditPostUiState(
     val saving: Boolean = false,
     // postarea originala (null = negasita sau fara drept de editare)
     val post: Post? = null,
+    val title: String = "",
     val description: String = "",
-    // fotografia (base64 / URL); se schimba doar daca utilizatorul alege alta
+    // fotografia (Base64); se schimba doar daca utilizatorul alege alta
     val photo: String = "",
+    val rating: Int = 0,
+    val visitDate: Long = 0,
+    val isDraft: Boolean = false,
     val error: String? = null,
-    // mesaj final, afisat inainte de a reveni (ex. "Salvată doar pe telefon")
+    // mesaj final, afisat inainte de a reveni (ex. "Salvată pe telefon...")
     val savedMessage: String? = null
 )
 
 /**
- * Editarea unei postari proprii (Update din CRUD). Doar autorul poate edita;
- * regula e verificata aici, nu doar in UI (butonul "Editează").
+ * Editarea unei postari proprii (Update din CRUD), si offline: modificarea se salveaza
+ * pe telefon ("Pending") si PostRepository o trimite cand serverul e disponibil.
+ * Doar autorul poate edita; regula e verificata aici (si pe server), nu doar in UI.
  */
 class EditPostViewModel(
     private val postRepository: PostRepository,
@@ -101,14 +104,18 @@ class EditPostViewModel(
                 val user = roleRepository.currentUserOnce()
                 val post = postRepository.findPost(postId)
                 uiState = when {
-                    post == null -> EditPostUiState(loading = false, error = "Postarea nu mai există.")
+                    post == null || post.isDeleted -> EditPostUiState(loading = false, error = "Postarea nu mai există.")
                     user == null || user.isBlocked || post.user_id != user.ownerKey ->
                         EditPostUiState(loading = false, error = "Puteți edita doar postările proprii.")
                     else -> EditPostUiState(
                         loading = false,
                         post = post,
+                        title = post.title,
                         description = post.description,
-                        photo = post.photo
+                        photo = post.photo,
+                        rating = post.rating,
+                        visitDate = post.visit_date,
+                        isDraft = post.status == PostStatus.DRAFT
                     )
                 }
             } catch (e: Exception) {
@@ -118,26 +125,51 @@ class EditPostViewModel(
         }
     }
 
+    fun onTitleChange(value: String) {
+        if (value.length <= MAX_TITLE) uiState = uiState.copy(title = value, error = null)
+    }
+
     fun onDescriptionChange(value: String) {
         if (value.length <= MAX_DESCRIPTION) uiState = uiState.copy(description = value, error = null)
     }
 
     fun onPhotoPicked(base64: String?) {
-        uiState = if (base64 == null) {
-            uiState.copy(error = "Imaginea nu a putut fi citită.")
-        } else {
-            uiState.copy(photo = base64, error = null)
-        }
+        uiState = if (base64 == null) uiState.copy(error = "Imaginea nu a putut fi citită.")
+        else uiState.copy(photo = base64, error = null)
     }
 
+    fun onRatingChange(value: Int) {
+        uiState = uiState.copy(rating = value.coerceIn(0, 5))
+    }
+
+    fun onVisitDateChange(value: Long) {
+        uiState = uiState.copy(visitDate = value)
+    }
+
+    fun onDraftChange(value: Boolean) {
+        uiState = uiState.copy(isDraft = value)
+    }
+
+    private fun edited(original: Post) = original.copy(
+        title = uiState.title.trim(),
+        description = uiState.description.trim(),
+        photo = uiState.photo,
+        rating = uiState.rating,
+        visit_date = uiState.visitDate,
+        status = if (uiState.isDraft) PostStatus.DRAFT else PostStatus.ACTIVE
+    )
+
     val hasChanges: Boolean
-        get() = uiState.post?.let { it.description != uiState.description.trim() || it.photo != uiState.photo } ?: false
+        get() = uiState.post?.let { original ->
+            // o postare refuzata de server ("Sincronizare esuata") se poate retrimite si neschimbata
+            edited(original) != original || original.syncStatus == SyncStatus.FAILED
+        } ?: false
 
     fun save() {
         val original = uiState.post ?: return
-        val description = uiState.description.trim()
-        if (description.isEmpty()) {
-            uiState = uiState.copy(error = "Descrierea nu poate fi goală.")
+        val changed = edited(original)
+        if (changed.title.isEmpty() && changed.description.isEmpty() && changed.photo.isEmpty()) {
+            uiState = uiState.copy(error = "Postarea trebuie să aibă un titlu, un text sau o poză.")
             return
         }
         if (!hasChanges) {
@@ -153,32 +185,26 @@ class EditPostViewModel(
                     uiState = uiState.copy(saving = false, error = "Puteți edita doar postările proprii.")
                     return@launch
                 }
-                val result = postRepository.updatePost(
-                    original.copy(description = description, photo = uiState.photo)
-                )
+                val published = original.status == PostStatus.DRAFT && changed.status == PostStatus.ACTIVE
+                val result = postRepository.updatePost(changed)
                 uiState = uiState.copy(
                     saving = false,
-                    savedMessage = when (result) {
-                        PostRepository.UpdateResult.SAVED -> "Postarea a fost actualizată."
-                        PostRepository.UpdateResult.SAVED_LOCALLY_ONLY ->
-                            "Postarea a fost actualizată; se trimite pe server când revine conexiunea."
-                    }
+                    savedMessage = writeResultMessage(
+                        result,
+                        if (published) "Ciorna a fost publicată." else "Postarea a fost actualizată."
+                    )
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "save failed", e)
-                uiState = uiState.copy(
-                    saving = false,
-                    error = if (e is OfflineException)
-                        "Ești offline. Editarea are nevoie de conexiune la server; încearcă din nou mai târziu."
-                    else e.toUserMessage("Modificările nu au putut fi salvate.")
-                )
+                uiState = uiState.copy(saving = false, error = e.toUserMessage("Modificările nu au putut fi salvate."))
             }
         }
     }
 
     companion object {
         private const val TAG = "EditPostViewModel"
-        const val MAX_DESCRIPTION = 1000
+        const val MAX_TITLE = 120
+        const val MAX_DESCRIPTION = 2000
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -195,15 +221,10 @@ class EditPostViewModel(
 fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
     val viewModel = viewModel<EditPostViewModel>(factory = EditPostViewModel.Factory)
     val state = viewModel.uiState
-    val context = LocalContext.current
 
     LaunchedEffect(postId) { viewModel.load(postId) }
     LaunchedEffect(state.savedMessage) {
         state.savedMessage?.let { onClose(it) }
-    }
-
-    val pickImage = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) viewModel.onPhotoPicked(convertImageToBase64(context.contentResolver, uri))
     }
 
     Scaffold(
@@ -212,7 +233,7 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                 title = { Text("Editează postarea") },
                 navigationIcon = {
                     IconButton(onClick = { onClose(null) }) {
-                        Icon(Icons.Default.ArrowBack, contentDescription = "Înapoi")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Înapoi")
                     }
                 }
             )
@@ -223,10 +244,13 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                 .padding(padding)
                 .fillMaxSize()
         ) {
+            val post = state.post
             when {
                 state.loading -> CircularProgressIndicator(Modifier.align(Alignment.Center))
-                state.post == null -> Column(
-                    modifier = Modifier.align(Alignment.Center).padding(24.dp),
+                post == null -> Column(
+                    modifier = Modifier
+                        .align(Alignment.Center)
+                        .padding(24.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(state.error ?: "Postarea nu a fost găsită.", color = MaterialTheme.colorScheme.error)
@@ -237,46 +261,68 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                     modifier = Modifier
                         .fillMaxSize()
                         .verticalScroll(rememberScrollState())
-                        .padding(16.dp)
+                        .padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
+                    // de ce a esuat sincronizarea (ex. date refuzate de server) -> utilizatorul corecteaza
+                    if (post.syncStatus == SyncStatus.FAILED) {
+                        Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                            Text(
+                                "Sincronizarea a eșuat: ${post.syncError.ifBlank { "serverul a refuzat postarea." }} " +
+                                        "Corectați postarea și salvați din nou.",
+                                color = MaterialTheme.colorScheme.onErrorContainer,
+                                modifier = Modifier.padding(12.dp)
+                            )
+                        }
+                    }
+                    OutlinedTextField(
+                        value = state.title,
+                        onValueChange = viewModel::onTitleChange,
+                        label = { Text("Titlu / destinație") },
+                        singleLine = true,
+                        enabled = !state.saving,
+                        supportingText = { Text("${state.title.length}/${EditPostViewModel.MAX_TITLE}") },
+                        modifier = Modifier.fillMaxWidth()
+                    )
                     OutlinedTextField(
                         value = state.description,
                         onValueChange = viewModel::onDescriptionChange,
-                        label = { Text("Descriere") },
-                        minLines = 4,
+                        label = { Text("Impresii") },
+                        minLines = 3,
                         enabled = !state.saving,
-                        isError = state.description.isBlank(),
-                        supportingText = {
-                            Text("${state.description.length}/${EditPostViewModel.MAX_DESCRIPTION}")
-                        },
+                        supportingText = { Text("${state.description.length}/${EditPostViewModel.MAX_DESCRIPTION}") },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    Spacer(Modifier.height(12.dp))
-                    PostPhotoPreview(state.photo)
-                    Spacer(Modifier.height(8.dp))
-                    OutlinedButton(
-                        onClick = { pickImage.launch("image/*") },
-                        enabled = !state.saving
-                    ) { Text(if (state.photo.isBlank()) "Adaugă o fotografie" else "Schimbă fotografia") }
-
-                    state.error?.let {
-                        Spacer(Modifier.height(8.dp))
-                        Text(it, color = MaterialTheme.colorScheme.error)
-                    }
-                    if (state.post.isNotSaved || state.post.id.startsWith("local-")) {
-                        Spacer(Modifier.height(8.dp))
+                    PhotoPickerField(photo = state.photo, enabled = !state.saving, onPhotoPicked = viewModel::onPhotoPicked)
+                    RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
+                    VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
+                    HorizontalDivider()
+                    LabeledSwitch(
+                        title = "Ciornă",
+                        description = if (state.isDraft) "O vezi doar tu. Oprește comutatorul ca să o publici."
+                        else "Publicată în lista tuturor",
+                        checked = state.isDraft,
+                        enabled = !state.saving,
+                        onCheckedChange = viewModel::onDraftChange
+                    )
+                    if (post.isNotSaved && post.syncStatus == SyncStatus.PENDING) {
                         Text(
-                            "Postarea nu a fost încă trimisă la server; va fi trimisă cu modificările la următoarea sincronizare.",
+                            "Ultimele modificări nu au ajuns încă pe server; se trimit automat când revine conexiunea.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-
-                    Spacer(Modifier.height(16.dp))
+                    state.error?.let {
+                        Text(
+                            it,
+                            color = MaterialTheme.colorScheme.error,
+                            modifier = Modifier.semantics { liveRegion = LiveRegionMode.Polite }
+                        )
+                    }
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         TextButton(onClick = { onClose(null) }, enabled = !state.saving) { Text("Anulează") }
                         Spacer(Modifier.width(8.dp))
-                        Button(onClick = viewModel::save, enabled = !state.saving && state.description.isNotBlank()) {
+                        Button(onClick = viewModel::save, enabled = !state.saving) {
                             if (state.saving) {
                                 CircularProgressIndicator(
                                     modifier = Modifier.size(18.dp),
@@ -291,35 +337,5 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun PostPhotoPreview(photo: String) {
-    if (photo.isBlank()) return
-    val modifier = Modifier
-        .fillMaxWidth()
-        .height(200.dp)
-        .clip(RoundedCornerShape(8.dp))
-    val base64Data = photo.substringAfter("base64,", "")
-    if (base64Data.isNotEmpty()) {
-        val bitmap = remember(photo) {
-            try {
-                val bytes = Base64.decode(base64Data, Base64.DEFAULT)
-                BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            } catch (e: IllegalArgumentException) {
-                null
-            }
-        }
-        bitmap?.let {
-            Image(it.asImageBitmap(), contentDescription = "Fotografia postării", modifier = modifier, contentScale = ContentScale.Crop)
-        }
-    } else {
-        Image(
-            painter = rememberAsyncImagePainter(photo),
-            contentDescription = "Fotografia postării",
-            modifier = modifier,
-            contentScale = ContentScale.Crop
-        )
     }
 }

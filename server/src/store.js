@@ -19,7 +19,7 @@ class Store {
   }
 
   load() {
-    const empty = { nextUserId: 1, users: [], posts: [], revokedTokens: [] };
+    const empty = { nextUserId: 1, users: [], posts: [], revokedTokens: [], tombstones: [] };
     try {
       return { ...empty, ...JSON.parse(fs.readFileSync(this.file, 'utf8')) };
     } catch (error) {
@@ -126,11 +126,25 @@ class Store {
     return post;
   }
 
-  deletePost(id) {
+  /**
+   * Sterge postarea si tine minte ca a fost stearsa ("tombstone"): un telefon care o
+   * editase offline primeste 410 si nu o recreeaza din coada.
+   */
+  deletePost(id, { byModerator = false } = {}) {
     const before = this.data.posts.length;
     this.data.posts = this.data.posts.filter((p) => p.id !== id);
-    if (this.data.posts.length !== before) this.save();
-    return this.data.posts.length !== before;
+    if (this.data.posts.length === before) return false;
+    this.data.tombstones.push({ id, byModerator, deletedAt: new Date().toISOString() });
+    this.save();
+    return true;
+  }
+
+  findTombstone(id) {
+    return this.data.tombstones.find((t) => t.id === id) || null;
+  }
+
+  countTombstones({ byModerator }) {
+    return this.data.tombstones.filter((t) => t.byModerator === byModerator).length;
   }
 }
 

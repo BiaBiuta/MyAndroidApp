@@ -1,5 +1,14 @@
 package com.example.myandroidapp.todo.ui.admin
 
+import com.example.myapplication.network.MyNetworkStatusViewModel
+import com.example.myandroidapp.todo.ui.posts.PostComponent
+import com.example.myandroidapp.todo.data.remote.ServerStats
+import com.example.myandroidapp.todo.data.Post
+import androidx.compose.material.icons.filled.VisibilityOff
+import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalContext
+import android.app.Application
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -72,7 +81,15 @@ fun AdminScreen(onBack: () -> Unit) {
     val users by viewModel.users.collectAsStateWithLifecycle(initialValue = emptyList())
     val reportsByPost by viewModel.pendingReportsByPost.collectAsStateWithLifecycle(initialValue = emptyMap())
     val me by viewModel.currentUser.collectAsStateWithLifecycle()
+    val posts by viewModel.allPosts.collectAsStateWithLifecycle(initialValue = emptyList())
+    // moderarea schimba ce vad toti utilizatorii, deci cere conexiune (dezactivata offline)
+    val network = viewModel<MyNetworkStatusViewModel>(
+        factory = MyNetworkStatusViewModel.Factory(LocalContext.current.applicationContext as Application)
+    )
+    val isOnline = network.uiState
+    // 0 = Postari (moderare), 1 = Raportari, 2 = Utilizatori
     var tab by rememberSaveable { mutableIntStateOf(0) }
+    var postToDelete by remember { mutableStateOf<Post?>(null) }
     // Dialogul de raspuns: postarea + decizia (true = sterge postarea, false = respinge)
     var answering by remember { mutableStateOf<Pair<ReportedPost, Boolean>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
@@ -110,33 +127,73 @@ fun AdminScreen(onBack: () -> Unit) {
                 return@Column
             }
             TabRow(selectedTabIndex = tab) {
-                Tab(selected = tab == 0, onClick = { tab = 0 }, text = {
+                Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Postări") })
+                Tab(selected = tab == 1, onClick = { tab = 1 }, text = {
                     BadgedBox(badge = { if (reported.isNotEmpty()) Badge { Text("${reported.size}") } }) {
                         Text("Raportări")
                     }
                 })
-                Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Utilizatori (${users.size})") })
+                Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Utilizatori") })
             }
             if (viewModel.busy) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+            if (!isOnline) {
+                Text(
+                    "Ești offline: vezi datele salvate, dar acțiunile de moderare sunt dezactivate până revine conexiunea.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onErrorContainer,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.errorContainer)
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                )
+            }
 
             when (tab) {
-                0 -> ReportedPostsList(
+                0 -> ModerationTab(
+                    stats = viewModel.stats,
+                    posts = posts,
+                    enabled = !viewModel.busy && isOnline,
+                    onRefresh = viewModel::refreshAll,
+                    onToggleHidden = viewModel::toggleHidden,
+                    onDelete = { postToDelete = it }
+                )
+                1 -> ReportedPostsList(
                     reported = reported,
                     reportsByPost = reportsByPost,
                     users = users,
-                    enabled = !viewModel.busy,
+                    enabled = !viewModel.busy && isOnline,
                     onDelete = { answering = it to true },
                     onDismiss = { answering = it to false }
                 )
                 else -> UsersList(
                     users = users,
                     currentUserId = me?.email,
-                    enabled = !viewModel.busy,
+                    enabled = !viewModel.busy && isOnline,
                     onToggleRole = viewModel::toggleRole,
                     onToggleBlocked = viewModel::toggleBlocked
                 )
             }
         }
+    }
+
+    postToDelete?.let { post ->
+        AlertDialog(
+            onDismissRequest = { postToDelete = null },
+            title = { Text("Ștergi postarea?") },
+            text = {
+                Text(
+                    "„${post.title.ifBlank { post.description.take(60) }}” va fi ștearsă pentru toți utilizatorii, " +
+                            "iar autorul va primi un mesaj. Dacă vrei doar s-o scoți din feed, folosește „Ascunde”."
+                )
+            },
+            confirmButton = {
+                Button(onClick = {
+                    viewModel.deleteAsModerator(post)
+                    postToDelete = null
+                }) { Text("Șterge") }
+            },
+            dismissButton = { TextButton(onClick = { postToDelete = null }) { Text("Anulează") } }
+        )
     }
 
     answering?.let { (item, delete) ->
@@ -395,6 +452,97 @@ private fun UsersList(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * Moderarea postarilor: statisticile de pe server, apoi fiecare postare (inclusiv cele ascunse)
+ * cu "Ascunde" / "Reafișează" si "Șterge".
+ */
+@Composable
+private fun ModerationTab(
+    stats: ServerStats?,
+    posts: List<Post>,
+    enabled: Boolean,
+    onRefresh: () -> Unit,
+    onToggleHidden: (Post) -> Unit,
+    onDelete: (Post) -> Unit
+) {
+    LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
+        item {
+            StatsRow(stats = stats, onRefresh = onRefresh)
+        }
+        if (posts.isEmpty()) {
+            item {
+                Text(
+                    "Nicio postare de moderat.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(24.dp)
+                )
+            }
+        }
+        items(posts, key = { it.id }) { post ->
+            PostComponent(
+                dep = post,
+                onClick = {},
+                actions = {
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                        OutlinedButton(onClick = { onToggleHidden(post) }, enabled = enabled) {
+                            Icon(
+                                if (post.hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(if (post.hidden) "Reafișează" else "Ascunde")
+                        }
+                        Spacer(Modifier.width(8.dp))
+                        Button(onClick = { onDelete(post) }, enabled = enabled) { Text("Șterge") }
+                    }
+                }
+            )
+        }
+    }
+}
+
+/** Statisticile sistemului (de pe server). */
+@Composable
+private fun StatsRow(stats: ServerStats?, onRefresh: () -> Unit) {
+    Column(modifier = Modifier.padding(vertical = 12.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Statistici", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            TextButton(onClick = onRefresh) { Text("Actualizează") }
+        }
+        if (stats == null) {
+            Text(
+                "Statisticile vin de pe server; nu sunt disponibile acum.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            return@Column
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            StatCard("Utilizatori activi", "${stats.users.active}", "din ${stats.users.total}", Modifier.weight(1f))
+            StatCard("Postări publice", "${stats.posts.active}", "sincronizate", Modifier.weight(1f))
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
+            StatCard("Ascunse", "${stats.posts.hidden}", "de moderatori", Modifier.weight(1f))
+            StatCard("Ciorne", "${stats.posts.drafts}", "nepublicate", Modifier.weight(1f))
+            StatCard("Șterse", "${stats.posts.deletedByModerators}", "de moderatori", Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun StatCard(label: String, value: String, detail: String, modifier: Modifier = Modifier) {
+    Card(modifier = modifier) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Text(value, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+            Text(label, style = MaterialTheme.typography.labelMedium)
+            Text(detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
     }
 }

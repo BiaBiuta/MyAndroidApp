@@ -15,7 +15,9 @@ import java.net.UnknownHostException
 class ServerException(
     val status: Int,
     override val message: String,
-    val retryAfterSeconds: Int? = null
+    val retryAfterSeconds: Int? = null,
+    // corpul JSON al raspunsului (ex. la 409 contine versiunea de pe server a postarii)
+    val body: String? = null
 ) : Exception(message)
 
 /** Serverul nu a putut fi contactat (fara internet, server oprit, adresa gresita, timeout). */
@@ -46,7 +48,7 @@ private fun HttpException.toServerException(): ServerException {
         null
     }
     val retryAfter = response()?.headers()?.get("Retry-After")?.toIntOrNull()
-    return ServerException(code(), serverMessage ?: defaultMessage(code()), retryAfter)
+    return ServerException(code(), serverMessage ?: defaultMessage(code()), retryAfter, body)
 }
 
 private fun defaultMessage(status: Int) = when (status) {

@@ -29,11 +29,13 @@ Teste: `npm test` rulează 13 teste end-to-end (autentificare, token, CRUD, perm
 | POST | `/auth/anonymous` | – | Vizitator anonim: `{guestId}` (doar citire) |
 | GET | `/me` | ✓ | Contul din token |
 | POST | `/logout` | ✓ | Revocă token-ul curent |
-| GET | `/posts` | ✓ | Toate postările |
-| GET | `/post/:id` | ✓ | O postare |
-| POST | `/post` | ✓ | Postare nouă (doar USER; autorul vine din token) |
-| PUT | `/post/:id` | ✓ | Editare (doar autorul) |
-| DELETE | `/post/:id` | ✓ | Ștergere (autorul sau ADMIN) |
+| GET | `/posts` | ✓ | Postările vizibile: ciornele doar autorului, cele ascunse doar autorului și adminilor |
+| GET | `/post/:id` | ✓ | O postare (404 dacă nu ai voie s-o vezi) |
+| POST | `/post` | ✓ | Postare nouă (doar USER; id generat de client, idempotent; autorul vine din token) |
+| PUT | `/post/:id` | ✓ | Upsert (creare sau editare, doar autorul). Conflict: dacă serverul are o versiune mai nouă (`updated_at`) → **409** `{message, item}` (last-write-wins); postare ștearsă → **410** |
+| DELETE | `/post/:id` | ✓ | Ștergere (autorul sau ADMIN); lasă un „tombstone” ca un client offline să afle de ștergere |
+| PATCH | `/post/:id/visibility` | ✓ ADMIN | `{hidden: true/false}` — ascunde / reafișează o postare |
+| GET | `/stats` | ✓ ADMIN | Statistici: utilizatori (total/activi/blocați/admini), postări (active/ciorne/ascunse/șterse de moderatori) |
 | GET | `/users` | ✓ ADMIN | Lista de utilizatori (fără hash-uri) |
 | PATCH | `/users/:id` | ✓ ADMIN | `{role}` sau `{blocked}` |
 | GET | `/health` | – | Verificare că serverul rulează |
@@ -43,6 +45,12 @@ Teste: `npm test` rulează 13 teste end-to-end (autentificare, token, CRUD, perm
 `{"event":"created|updated|deleted","payload":{"item":{…}}}` la fiecare modificare.
 
 Erorile au forma `{"message": "…"}`, cu mesajul în română, pe înțelesul utilizatorului.
+
+## Câmpurile unei postări
+
+`id`, `title` (≤120), `description` (≤2000), `photo` (Base64, ≤1.000.000 caractere, altfel 413), `rating` (0–5),
+`visit_date` (ms), `status` (`ACTIVE` / `DRAFT`), `hidden`, `location`, `user_id`, `created_at`, `updated_at`.
+WebSocket-ul trimite fiecărui client doar ce are voie să vadă (ciorna altcuiva ajunge ca `deleted`).
 
 ## Securitate
 

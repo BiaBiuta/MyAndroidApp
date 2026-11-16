@@ -1,5 +1,9 @@
 package com.example.myapplication.todo.ui.items
 
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
@@ -220,12 +224,29 @@ fun PostsScreen(
             if (itemsViewModel.isRefreshing) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
+            // Cautare dupa destinatie + filtre (Toate / Ale mele / rating minim)
+            val filters by itemsViewModel.filters.collectAsStateWithLifecycle()
+            SearchAndFilters(
+                filters = filters,
+                showMineFilter = currentUser?.isRegularUser == true,
+                onQueryChange = itemsViewModel::onQueryChange,
+                onMineOnlyChange = itemsViewModel::onMineOnlyChange,
+                onMinRatingChange = itemsViewModel::onMinRatingChange
+            )
+            val noFilters = filters == PostsViewModel.Filters()
             PostList(
                 posts = itemsUiState,
+                isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
+                emptyText = if (noFilters) "Încă nu există postări. Fii primul care adaugă una!"
+                else "Nicio postare nu se potrivește căutării.",
                 onPostClick = { postId ->
                     val post = itemsUiState.find { it.id == postId }
-                    if (post != null) {
-                        Log.d("PostsScreen", "Post clicked: ${post.location?.latitude}, ${post.location?.longitude}")
+                    // "Sincronizare esuata – atinge pentru a corecta": deschide editarea
+                    if (post != null && post.syncStatus == com.example.myandroidapp.todo.data.SyncStatus.FAILED &&
+                        itemsViewModel.canEdit(post, currentUser)
+                    ) {
+                        onEditPost(post.id)
+                        return@PostList
                     }
                     post?.location?.let { location ->
                         handlePostClick(location) { location ->
@@ -393,6 +414,62 @@ fun PreviewPostsScreen() {
     PostsScreen(onItemClick = {}, onAddItem = {}, onLogout = {})
 }
 
+
+/** Bara de cautare si filtrele de deasupra feed-ului. */
+@Composable
+private fun SearchAndFilters(
+    filters: PostsViewModel.Filters,
+    showMineFilter: Boolean,
+    onQueryChange: (String) -> Unit,
+    onMineOnlyChange: (Boolean) -> Unit,
+    onMinRatingChange: (Int) -> Unit
+) {
+    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
+        androidx.compose.material3.OutlinedTextField(
+            value = filters.query,
+            onValueChange = onQueryChange,
+            placeholder = { androidx.compose.material3.Text("Caută o destinație…") },
+            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+            trailingIcon = {
+                if (filters.query.isNotEmpty()) {
+                    IconButton(onClick = { onQueryChange("") }) {
+                        Icon(Icons.Default.Clear, contentDescription = "Șterge căutarea")
+                    }
+                }
+            },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            androidx.compose.material3.FilterChip(
+                selected = !filters.mineOnly,
+                onClick = { onMineOnlyChange(false) },
+                label = { androidx.compose.material3.Text("Toate") }
+            )
+            if (showMineFilter) {
+                androidx.compose.material3.FilterChip(
+                    selected = filters.mineOnly,
+                    onClick = { onMineOnlyChange(true) },
+                    label = { androidx.compose.material3.Text("Ale mele") }
+                )
+            }
+            listOf(0, 3, 4, 5).forEach { stars ->
+                androidx.compose.material3.FilterChip(
+                    selected = filters.minRating == stars,
+                    onClick = { onMinRatingChange(stars) },
+                    label = { androidx.compose.material3.Text(if (stars == 0) "Orice rating" else "$stars★+") },
+                    modifier = Modifier.semantics {
+                        contentDescription = if (stars == 0) "Orice rating" else "Cel puțin $stars stele"
+                    }
+                )
+            }
+        }
+    }
+}
 
 /**
  * Bannerul de conectivitate de deasupra listei:

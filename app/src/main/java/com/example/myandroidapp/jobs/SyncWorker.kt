@@ -6,20 +6,23 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myandroidapp.MyApplication
 
-/** Pornit cand revine reteaua: trimite postarile publice create offline, apoi reincarca lista. */
+/**
+ * Pornit cand revine reteaua (SyncScheduler / NetworkChangeReceiver): trimite pe server tot ce s-a
+ * modificat offline, apoi reincarca lista. Daca serverul tot nu raspunde, WorkManager reincearca.
+ */
 class SyncWorker(
     context: Context,
     workerParams: WorkerParameters
 ) : CoroutineWorker(context, workerParams) {
     override suspend fun doWork(): Result {
-        val itemRepository = (applicationContext as MyApplication).container.postRepository
+        val repository = (applicationContext as MyApplication).container.postRepository
         return try {
-            Log.d("SyncWorker", "unsyncedItems: ${itemRepository.getUnsyncedItems().size}")
-            itemRepository.syncUnsynced()
-            itemRepository.refresh()
-            Result.success()
+            val done = repository.syncUnsynced()
+            repository.refresh()
+            Log.d("SyncWorker", "sincronizare ${if (done) "completa" else "incompleta, se reia"}")
+            if (done) Result.success() else Result.retry()
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.w("SyncWorker", "sincronizarea a esuat, se reia", e)
             Result.retry()
         }
     }
