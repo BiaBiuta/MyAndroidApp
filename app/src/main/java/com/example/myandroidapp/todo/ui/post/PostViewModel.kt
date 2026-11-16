@@ -28,7 +28,9 @@ data class PostFormState(
     val photo: String = "",
     val rating: Int = 0,
     val visitDate: Long = System.currentTimeMillis(),
-    val location: Location? = null,
+    // locul vizitat (OpenStreetMap): nume + coordonate; Location() = fara loc
+    val place: String = "",
+    val location: Location = Location(),
     // ciorna: vizibila doar autorului, pana o publica
     val isDraft: Boolean = false,
     // postare privata: doar pe telefon, criptata, in sectiunea privata
@@ -72,8 +74,8 @@ class PostViewModel(
         state = state.copy(visitDate = value)
     }
 
-    fun onLocationSelected(latitude: Double, longitude: Double) {
-        state = state.copy(location = Location(latitude, longitude))
+    fun onLocationChange(place: String, location: Location) {
+        state = state.copy(place = place, location = location, error = null)
     }
 
     fun onDraftChange(value: Boolean) {
@@ -115,7 +117,8 @@ class PostViewModel(
                     rating = form.rating,
                     visit_date = form.visitDate,
                     status = if (form.isDraft) PostStatus.DRAFT else PostStatus.ACTIVE,
-                    location = form.location ?: Location(),
+                    place = form.place.trim(),
+                    location = form.location,
                     // ownerKey = id-ul de pe server; postarile proprii se recunosc dupa el
                     user_id = user.ownerKey,
                     user_first_name = user.email.substringBefore("@"),

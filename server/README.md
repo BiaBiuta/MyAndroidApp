@@ -38,7 +38,7 @@ Teste: `npm test` rulează 13 teste end-to-end (autentificare, token, CRUD, perm
 | GET | `/stats` | ✓ ADMIN | Statistici: utilizatori (total/activi/blocați/admini), postări (active/ciorne/ascunse/șterse de moderatori) |
 | GET | `/users` | ✓ ADMIN | Lista de utilizatori (fără hash-uri) |
 | PATCH | `/users/:id` | ✓ ADMIN | `{role}` sau `{blocked}` |
-| GET | `/health` | – | Verificare că serverul rulează |
+| GET | `/health` | – | Verificare că serverul rulează; `version` (3) și `features` arată că e versiunea nouă |
 
 **WebSocket** (aceeași adresă, `ws://…`): clientul trimite
 `{"type":"authorization","payload":{"token":"…"}}`, iar serverul trimite clienților autorizați
@@ -48,7 +48,7 @@ Erorile au forma `{"message": "…"}`, cu mesajul în română, pe înțelesul u
 
 ## Câmpurile unei postări
 
-`id`, `title` (≤120), `description` (≤2000), `photo` (Base64, ≤1.000.000 caractere, altfel 413), `rating` (0–5),
+`id`, `title` (≤120), `place` (numele locului, ≤160), `description` (≤2000), `photo` (Base64, ≤1.000.000 caractere, altfel 413), `rating` (0–5),
 `visit_date` (ms), `status` (`ACTIVE` / `DRAFT`), `hidden`, `location`, `user_id`, `created_at`, `updated_at`.
 WebSocket-ul trimite fiecărui client doar ce are voie să vadă (ciorna altcuiva ajunge ca `deleted`).
 

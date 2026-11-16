@@ -15,6 +15,8 @@ import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.EditNote
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Place
+import androidx.compose.ui.graphics.Color
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.outlined.StarBorder
 import androidx.compose.material3.Icon
@@ -82,9 +84,28 @@ fun PostList(
     }
 }
 
+/** Numele autorului afisat pe card ("Călător" daca lipseste). */
+fun authorName(post: Post): String =
+    "${post.user_first_name} ${post.user_last_name}".trim().ifBlank { "Călător" }
+
+/** "2026-11-16T18:03:00.000Z" -> data si ora locala, scurt (ex. "16 nov. 2026, 20:03"). */
+fun formatPostDate(iso: String): String {
+    if (iso.isBlank()) return ""
+    return try {
+        val parser = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", java.util.Locale.US).apply {
+            timeZone = java.util.TimeZone.getTimeZone("UTC")
+        }
+        val date = parser.parse(iso.take(19)) ?: return iso.take(16).replace('T', ' ')
+        java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT).format(date)
+    } catch (e: Exception) {
+        iso.take(16).replace('T', ' ')
+    }
+}
+
 /**
- * Cardul unei postari: autor si data, titlu, rating, data vizitei, insignele de stare
- * (sincronizare, ciorna, ascunsa de moderator), textul si poza.
+ * Cardul unei postari: poza sus, apoi titlul, locul, rating-ul si data vizitei, insignele de stare
+ * (sincronizare, ciorna, ascunsa de moderator), inceputul impresiilor si autorul.
+ * Atingerea cardului deschide detaliile postarii.
  */
 @Composable
 fun PostComponent(
@@ -98,33 +119,42 @@ fun PostComponent(
             .fillMaxWidth()
             .padding(vertical = 6.dp)
             .clickable(onClick = onClick),
-        shape = RoundedCornerShape(12.dp),
-        elevation = CardDefaults.cardElevation(2.dp)
+        shape = RoundedCornerShape(16.dp),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
-            // Autorul si data publicarii
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "${dep.user_first_name} ${dep.user_last_name}".trim().ifBlank { "Călător" },
-                        style = MaterialTheme.typography.labelLarge
+        if (dep.photo.isNotBlank()) {
+            PostPhoto(photo = dep.photo, height = 190.dp, rounded = false)
+        }
+        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
+            if (dep.title.isNotBlank()) {
+                Text(
+                    text = dep.title,
+                    style = MaterialTheme.typography.titleLarge,
+                    maxLines = 2,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
+            }
+            if (dep.place.isNotBlank()) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        Icons.Default.Place,
+                        contentDescription = "Locul",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(16.dp)
                     )
-                    if (dep.created_at.isNotBlank()) {
-                        Text(
-                            text = dep.created_at.take(16).replace('T', ' '),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+                    Spacer(modifier = Modifier.width(4.dp))
+                    Text(
+                        text = dep.place,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                    )
                 }
             }
-
-            if (dep.title.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Text(text = dep.title, style = MaterialTheme.typography.titleLarge)
-            }
             if (dep.rating > 0 || dep.visit_date > 0) {
-                Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     if (dep.rating > 0) RatingStars(dep.rating)
                     if (dep.rating > 0 && dep.visit_date > 0) Spacer(modifier = Modifier.width(12.dp))
@@ -142,13 +172,20 @@ fun PostComponent(
 
             if (dep.description.isNotBlank()) {
                 Spacer(modifier = Modifier.height(8.dp))
-                Text(text = dep.description, style = MaterialTheme.typography.bodyLarge)
+                Text(
+                    text = dep.description,
+                    style = MaterialTheme.typography.bodyMedium,
+                    maxLines = 3,
+                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                )
             }
-            if (dep.photo.isNotBlank()) {
-                Spacer(modifier = Modifier.height(8.dp))
-                PostPhoto(photo = dep.photo)
-            }
-            // Actiunile permise rolului curent (editeaza / sterge / raporteaza)
+            Spacer(modifier = Modifier.height(10.dp))
+            Text(
+                text = listOf(authorName(dep), formatPostDate(dep.created_at)).filter { it.isNotBlank() }.joinToString(" · "),
+                style = MaterialTheme.typography.labelMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            // Actiunile permise rolului curent (publica / editeaza / sterge / raporteaza)
             actions()
         }
     }
@@ -156,14 +193,14 @@ fun PostComponent(
 
 /** Stelele unui rating (doar afisare); TalkBack citeste "4 din 5 stele". */
 @Composable
-fun RatingStars(rating: Int) {
+fun RatingStars(rating: Int, size: androidx.compose.ui.unit.Dp = 18.dp) {
     Row(modifier = Modifier.semantics(mergeDescendants = true) { contentDescription = "$rating din 5 stele" }) {
         for (star in 1..5) {
             Icon(
                 imageVector = if (star <= rating) Icons.Filled.Star else Icons.Outlined.StarBorder,
                 contentDescription = null,
-                tint = if (star <= rating) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
-                modifier = Modifier.size(18.dp)
+                tint = if (star <= rating) Color(0xFFF5A623) else MaterialTheme.colorScheme.outline,
+                modifier = Modifier.size(size)
             )
         }
     }
@@ -184,7 +221,8 @@ fun PostBadges(post: Post, showSyncStatus: Boolean) {
                 else -> add(Triple(Icons.Default.CloudDone, "Sincronizată", BadgeTone.OK))
             }
         }
-        if (post.status == PostStatus.DRAFT) add(Triple(Icons.Default.EditNote, "Ciornă", BadgeTone.NEUTRAL))
+        // ciorna se vede bine (doar autorul o vede): trebuie publicata ca s-o vada ceilalti
+        if (post.status == PostStatus.DRAFT) add(Triple(Icons.Default.EditNote, "Ciornă · doar tu o vezi", BadgeTone.PENDING))
         if (post.hidden) add(Triple(Icons.Default.VisibilityOff, "Ascunsă de moderator", BadgeTone.ERROR))
     }
     if (badges.isEmpty()) return
@@ -231,19 +269,27 @@ private fun FlowRowCompat(items: List<@Composable () -> Unit>) {
  * Folosita in lista principala si in panoul de administrare (postarile raportate).
  */
 @Composable
-fun PostPhoto(photo: String?, modifier: Modifier = Modifier) {
+fun PostPhoto(
+    photo: String?,
+    modifier: Modifier = Modifier,
+    height: androidx.compose.ui.unit.Dp = 200.dp,
+    rounded: Boolean = true
+) {
     if (photo.isNullOrBlank()) return
+    // decodarea Base64 o singura data per poza (nu la fiecare recompunere / derulare)
     val imageModifier = modifier
         .fillMaxWidth()
-        .height(200.dp)
-        .clip(RoundedCornerShape(8.dp))
+        .height(height)
+        .let { if (rounded) it.clip(RoundedCornerShape(8.dp)) else it }
     val base64Data = photo.substringAfter("base64,", "")
     if (base64Data.isNotEmpty()) {
-        val bitmap = try {
-            val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
-            BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
-        } catch (e: IllegalArgumentException) {
-            null
+        val bitmap = androidx.compose.runtime.remember(base64Data) {
+            try {
+                val decodedBytes = Base64.decode(base64Data, Base64.DEFAULT)
+                BitmapFactory.decodeByteArray(decodedBytes, 0, decodedBytes.size)
+            } catch (e: IllegalArgumentException) {
+                null
+            }
         }
         bitmap?.let {
             Image(

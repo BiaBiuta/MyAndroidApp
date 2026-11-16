@@ -42,6 +42,11 @@ import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.isAdmin
 import com.example.myandroidapp.todo.data.Post
+import com.example.myandroidapp.todo.data.PostStatus
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.saveable.rememberSaveable
 import com.example.myandroidapp.todo.data.PostRepository
 import com.example.myandroidapp.todo.ui.posts.PostList
 import com.example.myapplication.todo.ui.items.PostRoleActions
@@ -88,6 +93,26 @@ class MyPostsViewModel(
         }
     }
 
+    /** Publica o ciorna proprie (si offline: se trimite la sincronizare). */
+    fun publish(post: Post) {
+        viewModelScope.launch {
+            val user = userRepository.currentUserOnce()
+            if (user == null || post.user_id != user.ownerKey) {
+                message = "Puteți publica doar postările proprii."
+                return@launch
+            }
+            message = try {
+                com.example.myandroidapp.todo.ui.post.writeResultMessage(
+                    postRepository.publishDraft(post),
+                    "Ciorna a fost publicată."
+                )
+            } catch (e: Exception) {
+                Log.w("MyPostsViewModel", "publish failed", e)
+                e.toUserMessage("Ciorna nu a putut fi publicată.")
+            }
+        }
+    }
+
     companion object {
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
@@ -101,11 +126,20 @@ class MyPostsViewModel(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}) {
+fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}, onOpenPost: (id: String) -> Unit = {}) {
     val viewModel = viewModel<MyPostsViewModel>(factory = MyPostsViewModel.Factory)
     val posts by viewModel.myPosts.collectAsStateWithLifecycle(initialValue = emptyList())
     val snackbarHostState = remember { SnackbarHostState() }
     var postToDelete by remember { mutableStateOf<Post?>(null) }
+    // 0 = toate, 1 = publicate, 2 = ciorne
+    var tab by rememberSaveable { mutableIntStateOf(0) }
+    val drafts = posts.filter { it.status == PostStatus.DRAFT }
+    val published = posts.filter { it.status != PostStatus.DRAFT }
+    val shown = when (tab) {
+        1 -> published
+        2 -> drafts
+        else -> posts
+    }
 
     LaunchedEffect(viewModel.message) {
         viewModel.message?.let {
@@ -134,21 +168,30 @@ fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}) {
         ) {
             if (posts.isEmpty()) {
                 Text(
-                    "Nu ai încă postări publice.",
+                    "Nu ai încă postări. Adaugă una din ecranul principal (butonul +).",
                     textAlign = TextAlign.Center,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.align(Alignment.Center)
                 )
             } else {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    Text(
-                        "${posts.size} postări publice",
-                        style = MaterialTheme.typography.labelLarge,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
-                    )
+                    TabRow(selectedTabIndex = tab) {
+                        Tab(selected = tab == 0, onClick = { tab = 0 }, text = { Text("Toate (${posts.size})") })
+                        Tab(selected = tab == 1, onClick = { tab = 1 }, text = { Text("Publicate (${published.size})") })
+                        Tab(selected = tab == 2, onClick = { tab = 2 }, text = { Text("Ciorne (${drafts.size})") })
+                    }
+                    if (tab == 2 && drafts.isNotEmpty()) {
+                        Text(
+                            "Ciornele le vezi doar tu. Apasă „Publică” când sunt gata.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 8.dp)
+                        )
+                    }
                     PostList(
-                        posts = posts,
-                        onPostClick = {},
+                        posts = shown,
+                        emptyText = if (tab == 2) "Nu ai ciorne." else "Nu ai postări publicate.",
+                        onPostClick = onOpenPost,
                         modifier = Modifier.fillMaxSize(),
                         // toate sunt ale utilizatorului: se vede starea sincronizarii fiecareia
                         isOwn = { true },
@@ -160,7 +203,9 @@ fun MyPostsScreen(onBack: () -> Unit, onEditPost: (id: String) -> Unit = {}) {
                                 onDelete = { postToDelete = post },
                                 onReport = {},
                                 canEdit = true,
-                                onEdit = { onEditPost(post.id) }
+                                onEdit = { onEditPost(post.id) },
+                                canPublish = post.status == PostStatus.DRAFT,
+                                onPublish = { viewModel.publish(post) }
                             )
                         }
                     )

@@ -42,7 +42,6 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.example.myandroidapp.maps.MyLocation
 import com.example.myandroidapp.notifications.createNotificationChannel
 import com.example.myandroidapp.notifications.showSimpleNotification
 
@@ -125,20 +124,12 @@ fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
             RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
             VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
 
-            Text("Locația", style = MaterialTheme.typography.labelLarge)
-            MyLocation(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(260.dp),
-                onLocationSelected = viewModel::onLocationSelected
+            LocationPickerField(
+                place = state.place,
+                location = state.location,
+                enabled = !state.saving,
+                onLocationChange = viewModel::onLocationChange
             )
-            state.location?.let {
-                Text(
-                    "Locația aleasă: %.4f, %.4f".format(it.latitude, it.longitude),
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
 
             HorizontalDivider()
             LabeledSwitch(

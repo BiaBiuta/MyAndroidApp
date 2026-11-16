@@ -56,6 +56,8 @@ import com.example.myandroidapp.todo.data.PostRepository
 import com.example.myandroidapp.todo.data.PostStatus
 import com.example.myandroidapp.todo.data.SyncStatus
 import com.example.myandroidapp.todo.ui.post.LabeledSwitch
+import com.example.myandroidapp.todo.ui.post.LocationPickerField
+import com.example.myandroidapp.todo.data.Location
 import com.example.myandroidapp.todo.ui.post.PhotoPickerField
 import com.example.myandroidapp.todo.ui.post.RatingField
 import com.example.myandroidapp.todo.ui.post.VisitDateField
@@ -74,6 +76,8 @@ data class EditPostUiState(
     val photo: String = "",
     val rating: Int = 0,
     val visitDate: Long = 0,
+    val place: String = "",
+    val location: Location = Location(),
     val isDraft: Boolean = false,
     val error: String? = null,
     // mesaj final, afisat inainte de a reveni (ex. "Salvată pe telefon...")
@@ -115,6 +119,8 @@ class EditPostViewModel(
                         photo = post.photo,
                         rating = post.rating,
                         visitDate = post.visit_date,
+                        place = post.place,
+                        location = post.location,
                         isDraft = post.status == PostStatus.DRAFT
                     )
                 }
@@ -146,6 +152,10 @@ class EditPostViewModel(
         uiState = uiState.copy(visitDate = value)
     }
 
+    fun onLocationChange(place: String, location: Location) {
+        uiState = uiState.copy(place = place, location = location, error = null)
+    }
+
     fun onDraftChange(value: Boolean) {
         uiState = uiState.copy(isDraft = value)
     }
@@ -156,6 +166,8 @@ class EditPostViewModel(
         photo = uiState.photo,
         rating = uiState.rating,
         visit_date = uiState.visitDate,
+        place = uiState.place.trim(),
+        location = uiState.location,
         status = if (uiState.isDraft) PostStatus.DRAFT else PostStatus.ACTIVE
     )
 
@@ -296,6 +308,12 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                     PhotoPickerField(photo = state.photo, enabled = !state.saving, onPhotoPicked = viewModel::onPhotoPicked)
                     RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
                     VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
+                    LocationPickerField(
+                        place = state.place,
+                        location = state.location,
+                        enabled = !state.saving,
+                        onLocationChange = viewModel::onLocationChange
+                    )
                     HorizontalDivider()
                     LabeledSwitch(
                         title = "Ciornă",

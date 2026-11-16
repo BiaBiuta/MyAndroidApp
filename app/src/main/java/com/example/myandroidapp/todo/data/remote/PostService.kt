@@ -26,6 +26,11 @@ data class ServerStats(val users: UserStats, val posts: PostStats) {
  * automat TokenInterceptor (Api.okHttpClient) la fiecare cerere.
  */
 interface PostService {
+    // versiunea serverului: aplicatia avertizeaza daca ruleaza un server vechi
+    // (care ar ignora titlul, rating-ul, ciorna sau locul)
+    @GET("/health")
+    suspend fun health(): com.google.gson.JsonObject
+
     @GET("/posts")
     suspend fun find(): List<Post>
 

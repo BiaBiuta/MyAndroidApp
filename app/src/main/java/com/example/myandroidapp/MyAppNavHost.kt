@@ -11,6 +11,7 @@ import com.example.myandroidapp.todo.ui.admin.AdminScreen
 import com.example.myandroidapp.todo.ui.myposts.MyPostsScreen
 import com.example.myandroidapp.todo.ui.myreports.MyReportsScreen
 import com.example.myandroidapp.todo.ui.edit.EditPostScreen
+import com.example.myandroidapp.todo.ui.detail.PostDetailScreen
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -47,6 +48,7 @@ val myPostsRoute = "my-posts"
 val adminRoute = "admin"
 val myReportsRoute = "my-reports"
 val editPostRoute = "posts/edit"
+val postDetailRoute = "posts/detail"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -87,7 +89,7 @@ fun MyAppNavHost() {
             PostsScreen(
                 onItemClick = { itemId ->
                     Log.d("MyAppNavHost", "navigate to item $itemId")
-                    navController.navigate("$postsRoute/$itemId")
+                    if (!itemId.isNullOrEmpty()) navController.navigate("$postDetailRoute/${Uri.encode(itemId)}")
                 },
                 onAddItem = {
                     Log.d("MyAppNavHost", "navigate to new item")
@@ -121,7 +123,8 @@ fun MyAppNavHost() {
             RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
                 MyPostsScreen(
                     onBack = { navController.popBackStack() },
-                    onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
+                    onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
+                    onOpenPost = { id -> navController.navigate("$postDetailRoute/${Uri.encode(id)}") }
                 )
             }
         }
@@ -130,6 +133,17 @@ fun MyAppNavHost() {
             RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
                 MyReportsScreen(onBack = { navController.popBackStack() })
             }
+        }
+        // Detaliile unei postari: poza, impresiile, harta locului (OpenStreetMap)
+        composable(
+            route = "$postDetailRoute/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { entry ->
+            PostDetailScreen(
+                postId = entry.arguments?.getString("id").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onEdit = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
+            )
         }
         // Editarea unei postari proprii (dreptul e verificat si in EditPostViewModel)
         composable(

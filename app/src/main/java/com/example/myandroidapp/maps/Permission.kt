@@ -32,7 +32,7 @@ fun RequirePermissions(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(onClick = { permissionsState.launchMultiplePermissionRequest() }) {
-                Text("Request permissions")
+                Text("Permite accesul")
             }
         }
     }
@@ -43,34 +43,19 @@ private fun getTextToShowGivenPermissions(
     permissionStates: List<PermissionState>,
     shouldShowRationale: Boolean
 ): String {
-    val revokedPermissionsSize = permissionStates.size
-    if (revokedPermissionsSize == 0) {
-        return ""
+    if (permissionStates.isEmpty()) return ""
+    val names = permissionStates.map { friendlyName(it.permission) }.distinct().joinToString(", ")
+    return if (shouldShowRationale) {
+        "Aplicația are nevoie de acces la: $names. Te rugăm să-l permiți ca funcția să meargă."
+    } else {
+        "Accesul la $names nu a fost acordat. Îl poți permite acum sau din Setări → Aplicații."
     }
-    val textToShow = StringBuilder().apply {
-        append("The ")
-    }
-    for (i in permissionStates.indices) {
-        textToShow.append(permissionStates[i].permission)
-        when {
-            revokedPermissionsSize > 1 && i == revokedPermissionsSize - 2 -> {
-                textToShow.append(", and ")
-            }
-            i == revokedPermissionsSize - 1 -> {
-                textToShow.append(" ")
-            }
-            else -> {
-                textToShow.append(", ")
-            }
-        }
-    }
-    textToShow.append(if (revokedPermissionsSize == 1) "permission is" else "permissions are")
-    textToShow.append(
-        if (shouldShowRationale) {
-            " important. Please grant all of them for the app to function properly."
-        } else {
-            " denied. The app cannot function without them."
-        }
-    )
-    return textToShow.toString()
+}
+
+private fun friendlyName(permission: String): String = when {
+    permission.contains("LOCATION") -> "locație"
+    permission.contains("CAMERA") -> "cameră"
+    permission.contains("NOTIFICATIONS") -> "notificări"
+    permission.contains("IMAGES") || permission.contains("STORAGE") -> "poze"
+    else -> permission.substringAfterLast('.')
 }

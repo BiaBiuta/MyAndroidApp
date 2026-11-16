@@ -54,7 +54,11 @@ class PostsViewModel(
         val query: String = "",
         val mineOnly: Boolean = false,
         // 0 = orice rating; 1..5 = cel putin atatea stele
-        val minRating: Int = 0
+        val minRating: Int = 0,
+        // doar ciornele proprii (le vede doar autorul, pana le publica)
+        val draftsOnly: Boolean = false,
+        // true = cele mai bine notate primele (la rating egal: cele mai noi); false = cele mai noi primele
+        val sortByRating: Boolean = false
     )
 
     private val _filters = MutableStateFlow(Filters())
@@ -63,6 +67,8 @@ class PostsViewModel(
     fun onQueryChange(value: String) = _filters.update { it.copy(query = value) }
     fun onMineOnlyChange(value: Boolean) = _filters.update { it.copy(mineOnly = value) }
     fun onMinRatingChange(value: Int) = _filters.update { it.copy(minRating = value.coerceIn(0, 5)) }
+    fun onDraftsOnlyChange(value: Boolean) = _filters.update { it.copy(draftsOnly = value) }
+    fun onSortByRatingChange(value: Boolean) = _filters.update { it.copy(sortByRating = value) }
     fun clearFilters() = _filters.update { Filters() }
 
     /**
@@ -78,8 +84,13 @@ class PostsViewModel(
             val visible = (post.status != PostStatus.DRAFT || mine) && (!post.hidden || mine || user?.isAdmin == true)
             visible &&
                     (!f.mineOnly || mine) &&
+                    (!f.draftsOnly || (mine && post.status == PostStatus.DRAFT)) &&
                     (f.minRating == 0 || post.rating >= f.minRating) &&
-                    words.all { word -> normalize("${post.title} ${post.description}").contains(word) }
+                    // in cautare intra si numele locului
+                    words.all { word -> normalize("${post.title} ${post.place} ${post.description}").contains(word) }
+        }.let { list ->
+            // lista vine din Room deja ordonata dupa data (cele mai noi primele); sortarea e stabila
+            if (f.sortByRating) list.sortedByDescending { it.rating } else list
         }
     }
 
@@ -123,6 +134,36 @@ class PostsViewModel(
     var message by mutableStateOf<String?>(null)
         private set
 
+    /** true = serverul pornit e o versiune veche: titlul, rating-ul, ciornele si locul s-ar pierde. */
+    var serverOutdated by mutableStateOf(false)
+        private set
+
+    /** Numarul ciornelor proprii (pentru filtrul "Ciornele mele"). */
+    val myDraftCount: StateFlow<Int> = combine(postRepository.itemStream, currentUser) { posts, user ->
+        val me = user?.ownerKey
+        if (me == null) 0 else posts.count { it.user_id == me && it.status == PostStatus.DRAFT }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
+    /** Publica o ciorna proprie direct din lista (si offline). */
+    fun publishDraft(post: Post) {
+        viewModelScope.launch {
+            val user = roleRepository.currentUserOnce()
+            if (user == null || !canEdit(post, user)) {
+                message = "Puteți publica doar ciornele proprii."
+                return@launch
+            }
+            message = try {
+                com.example.myandroidapp.todo.ui.post.writeResultMessage(
+                    postRepository.publishDraft(post),
+                    "Ciorna a fost publicată."
+                )
+            } catch (e: Exception) {
+                Log.w(TAG, "publish failed", e)
+                "Ciorna nu a putut fi publicată."
+            }
+        }
+    }
+
     init {
         Log.d(TAG, "init")
         loadItems()
@@ -139,6 +180,7 @@ class PostsViewModel(
             isRefreshing = true
             // null = actualizat de pe server; altfel mesajul (ex. offline: se vad postarile salvate)
             postRepository.refresh()?.let { message = it }
+            postRepository.isServerOutdated()?.let { serverOutdated = it }
             isRefreshing = false
         }
     }

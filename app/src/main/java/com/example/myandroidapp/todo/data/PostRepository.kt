@@ -244,6 +244,20 @@ class PostRepository(
     }
 
     /** Editare (si offline): salvata local cu ora modificarii, apoi trimisa (sau pusa in coada). */
+    /** Publica o ciorna proprie (si offline: se trimite la sincronizare). */
+    suspend fun publishDraft(post: Post): WriteResult = updatePost(post.copy(status = PostStatus.ACTIVE))
+
+    /**
+     * true = serverul pornit e o versiune veche (nu stie de titlu / rating / ciorna / loc);
+     * false = e cel potrivit; null = nu s-a putut verifica (ex. offline).
+     */
+    suspend fun isServerOutdated(): Boolean? = try {
+        val health = apiCall { postService.health() }
+        (health.get("version")?.asInt ?: 1) < REQUIRED_SERVER_VERSION
+    } catch (e: Exception) {
+        null
+    }
+
     suspend fun updatePost(post: Post): WriteResult {
         itemDao.insert(post.copy(updated_at = now()).markPending())
         return pushOrQueue(post.id)
@@ -348,6 +362,8 @@ class PostRepository(
         .map { posts ->
             posts.map {
                 it.copy(
+                    title = SecureStore.decrypt(it.title),
+                    place = SecureStore.decrypt(it.place),
                     description = SecureStore.decrypt(it.description),
                     photo = SecureStore.decrypt(it.photo)
                 )
@@ -364,6 +380,8 @@ class PostRepository(
         )
         val encrypted = withContext(Dispatchers.Default) {
             privatePost.copy(
+                title = SecureStore.encrypt(privatePost.title),
+                place = SecureStore.encrypt(privatePost.place),
                 description = SecureStore.encrypt(privatePost.description),
                 photo = SecureStore.encrypt(privatePost.photo)
             )
@@ -592,3 +610,5 @@ class PostRepository(
 //        itemDao.de(item.lat, item.lon);
 //    }
 }
+/** Versiunea minima a serverului din repo (server/, GET /health) cu care merge aplicatia. */
+private const val REQUIRED_SERVER_VERSION = 3

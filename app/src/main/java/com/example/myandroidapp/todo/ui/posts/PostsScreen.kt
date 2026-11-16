@@ -3,13 +3,17 @@ package com.example.myapplication.todo.ui.items
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.Clear
+import androidx.compose.material.icons.filled.EditNote
+import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Cloud
+import androidx.compose.material.icons.automirrored.filled.Logout
+import androidx.compose.material.icons.filled.Publish
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CloudOff
-import MyLocationViewModel
 import android.app.Application
 import android.util.Log
 import androidx.compose.animation.AnimatedVisibility
@@ -54,7 +58,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.myandroidapp.R
-import com.example.myandroidapp.maps.MyMap
 import com.example.myandroidapp.todo.data.Location
 import com.example.myandroidapp.todo.ui.posts.PostList
 import com.example.myandroidapp.todo.ui.posts.PostsViewModel
@@ -94,8 +97,6 @@ fun PostsScreen(
     )
 
     var isEditing by remember { mutableStateOf(false) }
-    var showMapDialog by rememberSaveable { mutableStateOf(false) }
-    var selectedLocation by rememberSaveable { mutableStateOf<Pair<Double, Double>?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val itemsUiState by itemsViewModel.uiState.collectAsStateWithLifecycle(initialValue = listOf())
     val currentUser by itemsViewModel.currentUser.collectAsStateWithLifecycle()
@@ -115,7 +116,8 @@ fun PostsScreen(
 
     LaunchedEffect(isEditing) {
         if (isEditing) {
-            delay(3000L)
+            // scurta animatie a butonului, apoi formularul
+            delay(400L)
             isEditing = false
             onAddItem()
         }
@@ -126,12 +128,14 @@ fun PostsScreen(
             TopAppBar(
                 title = { Text(text = stringResource(id = R.string.posts)) },
                 actions = {
-                    Text(
-                        text = if (myNetworkStatusViewModel.uiState) "Online" else "Offline",
-                        style = androidx.compose.material3.MaterialTheme.typography.bodyLarge,
-                        color = if (myNetworkStatusViewModel.uiState)
+                    // starea retelei: iconita + text pentru TalkBack (detaliile sunt in banner)
+                    Icon(
+                        imageVector = if (myNetworkStatusViewModel.uiState) Icons.Default.Cloud else Icons.Default.CloudOff,
+                        contentDescription = if (myNetworkStatusViewModel.uiState) "Online" else "Offline",
+                        tint = if (myNetworkStatusViewModel.uiState)
                             androidx.compose.material3.MaterialTheme.colorScheme.primary
-                        else androidx.compose.material3.MaterialTheme.colorScheme.error
+                        else androidx.compose.material3.MaterialTheme.colorScheme.error,
+                        modifier = Modifier.padding(horizontal = 8.dp)
                     )
                     // Activare / dezactivare amprenta oricand, nu doar in dialogul de dupa primul login
                     if (showBiometricToggle) {
@@ -170,10 +174,13 @@ fun PostsScreen(
                     }
                     // Sectiunea privata (doar USER; cere din nou amprenta sau parola)
                     if (currentUser?.isRegularUser == true) {
-                        Button(onClick = onOpenPrivate) { Text("Privat") }
+                        IconButton(onClick = onOpenPrivate) {
+                            Icon(Icons.Default.Lock, contentDescription = "Postări private")
+                        }
                     }
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Button(onClick = onLogout) { Text("Logout") }
+                    IconButton(onClick = onLogout) {
+                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Deconectare")
+                    }
                 }
             )
         },
@@ -224,21 +231,32 @@ fun PostsScreen(
             if (itemsViewModel.isRefreshing) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
-            // Cautare dupa destinatie + filtre (Toate / Ale mele / rating minim)
+            // Serverul pornit e o versiune veche: titlul, rating-ul, ciornele si locul s-ar pierde
+            if (itemsViewModel.serverOutdated) {
+                ServerOutdatedBanner()
+            }
+            // Cautare dupa destinatie + filtre (Toate / Ale mele / Ciornele mele / rating minim)
             val filters by itemsViewModel.filters.collectAsStateWithLifecycle()
+            val myDraftCount by itemsViewModel.myDraftCount.collectAsStateWithLifecycle()
             SearchAndFilters(
                 filters = filters,
                 showMineFilter = currentUser?.isRegularUser == true,
                 onQueryChange = itemsViewModel::onQueryChange,
                 onMineOnlyChange = itemsViewModel::onMineOnlyChange,
-                onMinRatingChange = itemsViewModel::onMinRatingChange
+                onMinRatingChange = itemsViewModel::onMinRatingChange,
+                onSortByRatingChange = itemsViewModel::onSortByRatingChange,
+                draftCount = myDraftCount,
+                onDraftsOnlyChange = itemsViewModel::onDraftsOnlyChange
             )
             val noFilters = filters == PostsViewModel.Filters()
             PostList(
                 posts = itemsUiState,
                 isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
-                emptyText = if (noFilters) "Încă nu există postări. Fii primul care adaugă una!"
-                else "Nicio postare nu se potrivește căutării.",
+                emptyText = when {
+                    filters.draftsOnly -> "Nu ai ciorne. Când salvezi o postare ca ciornă, o găsești aici."
+                    noFilters -> "Încă nu există postări. Fii primul care adaugă una!"
+                    else -> "Nicio postare nu se potrivește căutării."
+                },
                 onPostClick = { postId ->
                     val post = itemsUiState.find { it.id == postId }
                     // "Sincronizare esuata – atinge pentru a corecta": deschide editarea
@@ -248,12 +266,8 @@ fun PostsScreen(
                         onEditPost(post.id)
                         return@PostList
                     }
-                    post?.location?.let { location ->
-                        handlePostClick(location) { location ->
-                            selectedLocation = location
-                            showMapDialog = true
-                        }
-                    }
+                    // detaliile postarii: poza mare, impresiile complete, harta locului
+                    if (post != null) onItemClick(post.id)
                 },
                 modifier = Modifier.fillMaxSize(),
                 actions = { post ->
@@ -264,7 +278,10 @@ fun PostsScreen(
                         onDelete = { postToDelete = post },
                         onReport = { postToReport = post },
                         canEdit = itemsViewModel.canEdit(post, currentUser),
-                        onEdit = { onEditPost(post.id) }
+                        onEdit = { onEditPost(post.id) },
+                        canPublish = post.status == com.example.myandroidapp.todo.data.PostStatus.DRAFT &&
+                                itemsViewModel.canEdit(post, currentUser),
+                        onPublish = { itemsViewModel.publishDraft(post) }
                     )
                 }
             )
@@ -346,40 +363,9 @@ fun PostsScreen(
         )
     }
 
-    if (showMapDialog) {
-        AlertDialog(
-            onDismissRequest = { showMapDialog = false },
-            title = { Text("Post Location") },
-            text = {
-                selectedLocation?.let { location ->
-                    ShowMyLocationForPost(Location(location.first, location.second), Modifier.fillMaxSize())
-                } ?: Text("Location not available")
-            },
-            confirmButton = {
-                Button(onClick = { showMapDialog = false }) { Text("Close") }
-            }
-        )
-    }
-
     EditMessage(shown = isEditing)
 }
 
-fun handlePostClick(location: Location?, onShowMap: (Pair<Double, Double>) -> Unit) {
-    location?.let {
-        onShowMap(Pair(it.latitude, it.longitude))
-    } ?: Log.w("PostClick", "Location is null.")
-}
-@Composable
-fun ShowMyLocationForPost(location: Location, modifier: Modifier) {
-    val myLocationViewModel = viewModel<MyLocationViewModel>(
-        factory = MyLocationViewModel.Factory(
-            LocalContext.current.applicationContext as Application
-        )
-    )
-    MyMap(location.latitude, location.longitude, modifier) { lat, lon ->
-        myLocationViewModel.updateSelectedLocation(lat, lon)
-    }
-}
 @Composable
 private fun EditMessage(shown: Boolean) {
     AnimatedVisibility(
@@ -398,15 +384,11 @@ private fun EditMessage(shown: Boolean) {
             color = MaterialTheme.colors.secondary,
             elevation = 4.dp
         ) {
-            Text("You enter in add screen", modifier = Modifier.padding(16.dp))
+            Text("Postare nouă…", modifier = Modifier.padding(16.dp))
         }
     }
 }
 
-//@Composable
-//fun ShowMyLocationForPost(location: Location, modifier: Modifier) {
-//    MyMap(location.latitude, location.longitude, modifier)
-//}
 
 @Preview
 @Composable
@@ -422,7 +404,10 @@ private fun SearchAndFilters(
     showMineFilter: Boolean,
     onQueryChange: (String) -> Unit,
     onMineOnlyChange: (Boolean) -> Unit,
-    onMinRatingChange: (Int) -> Unit
+    onMinRatingChange: (Int) -> Unit,
+    onSortByRatingChange: (Boolean) -> Unit,
+    draftCount: Int = 0,
+    onDraftsOnlyChange: (Boolean) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         androidx.compose.material3.OutlinedTextField(
@@ -446,18 +431,32 @@ private fun SearchAndFilters(
             horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             androidx.compose.material3.FilterChip(
-                selected = !filters.mineOnly,
-                onClick = { onMineOnlyChange(false) },
+                selected = !filters.mineOnly && !filters.draftsOnly,
+                onClick = { onMineOnlyChange(false); onDraftsOnlyChange(false) },
                 label = { androidx.compose.material3.Text("Toate") }
             )
             if (showMineFilter) {
                 androidx.compose.material3.FilterChip(
-                    selected = filters.mineOnly,
-                    onClick = { onMineOnlyChange(true) },
+                    selected = filters.mineOnly && !filters.draftsOnly,
+                    onClick = { onMineOnlyChange(true); onDraftsOnlyChange(false) },
                     label = { androidx.compose.material3.Text("Ale mele") }
                 )
+                // ciornele proprii, cu numarul lor, ca sa stii ce mai ai de publicat
+                androidx.compose.material3.FilterChip(
+                    selected = filters.draftsOnly,
+                    onClick = { onDraftsOnlyChange(!filters.draftsOnly) },
+                    leadingIcon = { Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    label = { androidx.compose.material3.Text("Ciornele mele ($draftCount)") }
+                )
             }
-            listOf(0, 3, 4, 5).forEach { stars ->
+            androidx.compose.material3.FilterChip(
+                selected = filters.sortByRating,
+                onClick = { onSortByRatingChange(!filters.sortByRating) },
+                label = {
+                    androidx.compose.material3.Text(if (filters.sortByRating) "Sortat: rating ↓" else "Sortat: cele mai noi")
+                }
+            )
+            (0..5).forEach { stars ->
                 androidx.compose.material3.FilterChip(
                     selected = filters.minRating == stars,
                     onClick = { onMinRatingChange(stars) },
@@ -468,6 +467,25 @@ private fun SearchAndFilters(
                 )
             }
         }
+    }
+}
+
+/** Avertisment: aplicatia vorbeste cu un server vechi (care nu stie de titlu, rating, ciorne, loc). */
+@Composable
+private fun ServerOutdatedBanner() {
+    androidx.compose.material3.Surface(
+        color = androidx.compose.material3.MaterialTheme.colorScheme.errorContainer,
+        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onErrorContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite }
+    ) {
+        Text(
+            "Serverul pornit este o versiune veche: titlul, rating-ul, ciornele și locul nu se salvează pe server. " +
+                    "Oprește-l și pornește-l din folderul server/ al proiectului (npm start).",
+            style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)
+        )
     }
 }
 
@@ -600,9 +618,12 @@ fun PostRoleActions(
     onDelete: () -> Unit,
     onReport: () -> Unit,
     canEdit: Boolean = false,
-    onEdit: () -> Unit = {}
+    onEdit: () -> Unit = {},
+    // ciorna proprie: "Publică" direct din lista, fara editare
+    canPublish: Boolean = false,
+    onPublish: () -> Unit = {}
 ) {
-    if (!canDelete && !canReport && !canEdit) return
+    if (!canDelete && !canReport && !canEdit && !canPublish) return
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -613,6 +634,14 @@ fun PostRoleActions(
                 Spacer(modifier = Modifier.width(4.dp))
                 Text(if (alreadyReported) "Raportat" else "Raportează")
             }
+        }
+        if (canPublish) {
+            FilledTonalButton(onClick = onPublish) {
+                Icon(Icons.Default.Publish, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Publică")
+            }
+            Spacer(modifier = Modifier.width(4.dp))
         }
         if (canEdit) {
             TextButton(onClick = onEdit) {

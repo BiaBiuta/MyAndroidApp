@@ -89,7 +89,8 @@ dependencies {
 
     implementation("com.google.android.gms:play-services-location:21.0.1")
 
-    implementation("com.google.maps.android:maps-compose:2.7.2")
+    // Harta: OpenStreetMap (osmdroid) - gratuita, fara cheie API (in locul Google Maps)
+    implementation("org.osmdroid:osmdroid-android:6.1.20")
 //    implementation(libs.androidx.room.runtime)
 //    implementation(libs.androidx.adapters)
 //    ksp(libs.androidx.room.compiler)
@@ -103,8 +104,6 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.play.services.location)
 
-    implementation(libs.maps.compose)
-    implementation(libs.play.services.maps)
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

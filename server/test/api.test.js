@@ -276,13 +276,15 @@ test('sincronizare: id generat pe telefon, PUT creeaza sau actualizeaza (upsert)
   const id = '3f1c2a9e-1111-4c2b-9d7e-aaaaaaaaaaaa';
   const created = await api('PUT', `/post/${id}`, {
     token,
-    body: { title: 'Cheile Turzii', description: 'Superb', rating: 5, visit_date: 1763251200000, updated_at: new Date().toISOString() },
+    body: { title: 'Cheile Turzii', description: 'Superb', rating: 5, visit_date: 1763251200000, place: 'Cheile Turzii, Cluj', location: { latitude: 46.56, longitude: 23.68 }, updated_at: new Date().toISOString() },
   });
   assert.equal(created.status, 201);
   assert.equal(created.body.id, id);
   assert.equal(created.body.user_id, String(user.id));
   assert.equal(created.body.rating, 5);
   assert.equal(created.body.status, 'ACTIVE');
+  assert.equal(created.body.place, 'Cheile Turzii, Cluj');
+  assert.equal(created.body.location, '46.56,23.68');
   // retrimiterea aceleiasi postari (ex. raspuns pierdut) nu o dubleaza
   const again = await api('POST', '/post', { token, body: { id, title: 'Cheile Turzii' } });
   assert.equal(again.status, 200);

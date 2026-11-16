@@ -30,6 +30,8 @@ data class Post(
     var rating: Int = 0,
     // data vizitei, in milisecunde (0 = necompletata)
     var visit_date: Long = 0,
+    // numele locului (ex. "Cheile Turzii, Cluj"), ales din cautare / GPS / harta (OpenStreetMap)
+    var place: String = "",
     // PostStatus: ACTIVE sau DRAFT
     var status: String = PostStatus.ACTIVE,
     // ascunsa de un administrator (o vad doar autorul si adminii)

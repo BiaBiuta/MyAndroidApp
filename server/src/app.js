@@ -71,7 +71,7 @@ function createApp(options = {}) {
     if (user.role !== 'ADMIN') throw new ApiError(403, 'Doar administratorii pot face această operație.');
   }
 
-  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', time: new Date().toISOString() } }));
+  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 3, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats'], time: new Date().toISOString() } }));
 
   router.add('POST', '/signup', ({ body }) => {
     const email = security.normalizeEmail(body.email);
@@ -223,7 +223,9 @@ function createApp(options = {}) {
     if (!Number.isFinite(visitDate) || visitDate < 0) throw new ApiError(400, 'Data vizitei nu este validă.');
     const status = body.status === undefined || body.status === null || body.status === '' ? 'ACTIVE' : body.status;
     if (!STATUSES.includes(status)) throw new ApiError(400, 'Starea postării trebuie să fie ACTIVE sau DRAFT.');
-    return { title, description, photo, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
+    const place = typeof body.place === 'string' ? body.place.trim() : '';
+    if (place.length > 160) throw new ApiError(400, 'Numele locului poate avea cel mult 160 de caractere.');
+    return { title, description, photo, place, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
   }
 
   /** Ce vede un utilizator: postarile active si neascunse; ale lui oricum; adminul si pe cele ascunse. */

@@ -27,9 +27,10 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 8: mesajele pentru autorii postarilor sterse de admin (author_notices)
 // version 9: metoda de autentificare a fiecarui cont (users.provider)
 // version 10: postari cu titlu, rating, data vizitei, ciorna, ascundere si stare de sincronizare
+// version 11: numele locului (place)
 @Database(
     entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class],
-    version = 10
+    version = 11
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -136,6 +137,13 @@ abstract class MyAppDatabase : RoomDatabase() {
             }
         }
 
+        // 10 -> 11: numele locului (harta OpenStreetMap in loc de Google Maps)
+        private val MIGRATION_10_11 = object : Migration(10, 11) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `place` TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         /**
          * La fiecare deschidere a bazei de date: pozele mai mari de ~1 MB (text Base64) se golesc.
          * SQLite pe Android nu poate citi un rand mai mare de ~2 MB ("Row too big to fit into
@@ -155,7 +163,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11)
                     .fallbackToDestructiveMigration()
                     .addCallback(REPAIR_OVERSIZED_PHOTOS)
                     .build()
