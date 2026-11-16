@@ -281,21 +281,9 @@ fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
     }
 }
 
-// Functia de conversie a imaginii in base64
-fun convertImageToBase64(contentResolver: ContentResolver, imageUri: Uri): String? {
-    return try {
-        val inputStream: InputStream? = contentResolver.openInputStream(imageUri)
-        val bytes = inputStream?.readBytes()
-        inputStream?.close()
-
-        if (bytes != null) {
-            // Convertește byte array într-un șir base64
-            "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.DEFAULT)
-        } else {
-            null
-        }
-    } catch (e: Exception) {
-        e.printStackTrace()
-        null
-    }
-}
+/**
+ * Poza aleasa -> Base64, MICSORATA si comprimata (vezi PhotoEncoder): pozele mari de la camera
+ * nu mai depasesc limita de ~2 MB pe rand a SQLite (aplicatia se oprea la afisarea listei).
+ */
+fun convertImageToBase64(contentResolver: ContentResolver, imageUri: Uri): String? =
+    PhotoEncoder.encode(contentResolver, imageUri)

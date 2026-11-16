@@ -28,6 +28,11 @@ android {
         vectorDrawables {
             useSupportLibrary = true
         }
+
+        // Adresa serverului (folderul server/ din repo). 10.0.2.2 = calculatorul gazda, vazut din emulator.
+        // Pentru un telefon real: IP-ul calculatorului in reteaua Wi-Fi, ex. "192.168.1.7:3000"
+        // (si adaugat in res/xml/network_security_config.xml).
+        buildConfigField("String", "SERVER_HOST", "\"10.0.2.2:3000\"")
     }
 
     buildTypes {
@@ -48,6 +53,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

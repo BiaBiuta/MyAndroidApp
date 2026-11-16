@@ -1,0 +1,14 @@
+{
+  "name": "wanderlog-server",
+  "version": "1.0.0",
+  "description": "Serverul REST + WebSocket pentru aplicatia Android WanderLog (fara dependinte externe)",
+  "main": "server.js",
+  "private": true,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test test/*.test.js"
+  }
+}

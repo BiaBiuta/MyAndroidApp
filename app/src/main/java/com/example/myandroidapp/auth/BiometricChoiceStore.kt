@@ -27,6 +27,11 @@ class BiometricChoiceStore(context: Context) {
         prefs.edit().putBoolean(keyFor(email), enabled).apply()
     }
 
+    /** Cont nou cu o adresa folosita inainte: alegerea veche nu se mai aplica, intrebam din nou. */
+    fun forget(email: String) {
+        prefs.edit().remove(keyFor(email)).apply()
+    }
+
     private fun keyFor(email: String) = "biometric_" + email.trim().lowercase()
 
     private companion object {

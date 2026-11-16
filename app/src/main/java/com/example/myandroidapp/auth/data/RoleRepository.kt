@@ -2,6 +2,11 @@ package com.example.myandroidapp.auth.data
 
 import android.util.Log
 import com.example.myandroidapp.auth.data.local.AuthProvider
+import com.example.myandroidapp.auth.data.remote.RemoteUser
+import com.example.myandroidapp.auth.data.remote.UserService
+import com.example.myandroidapp.core.data.remote.OfflineException
+import com.example.myandroidapp.core.data.remote.apiCall
+import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.auth.data.local.UserDao
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.UserRole
@@ -27,7 +32,8 @@ import java.util.Locale
  */
 class RoleRepository(
     private val userDao: UserDao,
-    private val userPreferencesRepository: UserPreferencesRepository
+    private val userPreferencesRepository: UserPreferencesRepository,
+    private val userService: UserService
 ) {
     companion object {
         private const val TAG = "RoleRepository"
@@ -110,42 +116,36 @@ class RoleRepository(
      * Salveaza in baza locala hash-ul parolei pentru un login reusit (online sau primul login
      * offline al unui cont nou), ca urmatoarele login-uri offline sa poata verifica parola.
      */
-    suspend fun saveCredentials(email: String, ownerKey: String, passwordHash: String) {
+    suspend fun saveCredentials(
+        email: String,
+        ownerKey: String,
+        passwordHash: String,
+        // trimise de server la login: rolul si metoda de autentificare sunt cele de pe server
+        role: String? = null,
+        provider: String? = null
+    ) {
         val normalized = normalize(email)
         val existing = userDao.findByEmail(normalized)
         val user = existing?.copy(
             ownerKey = ownerKey,
-            passwordHash = passwordHash,
+            // conturile Google / Apple / anonim nu au parola: pastram ce exista
+            passwordHash = passwordHash.ifEmpty { existing.passwordHash },
+            role = role ?: existing.role,
+            provider = provider ?: existing.provider,
+            isBlocked = if (role != null) false else existing.isBlocked, // serverul a acceptat login-ul
             lastLoginAt = System.currentTimeMillis()
         ) ?: UserEntity(
             email = normalized,
             ownerKey = ownerKey,
             displayName = normalized.substringBefore("@"),
-            role = if (normalized in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER,
-            passwordHash = passwordHash
+            role = role ?: if (normalized in DEFAULT_ADMIN_EMAILS) UserRole.ADMIN else UserRole.USER,
+            passwordHash = passwordHash,
+            provider = provider ?: AuthProvider.EMAIL
         )
         userDao.upsert(user)
     }
 
-    /** Rezultatul inregistrarii unui cont nou. */
-    enum class RegisterResult { CREATED, ALREADY_EXISTS, BLOCKED }
-
     suspend fun findAccount(email: String): UserEntity? = userDao.findByEmail(normalize(email))
-
-    /**
-     * Inregistrare: creeaza contul in baza de date locala, cu hash-ul parolei.
-     * Un cont care a fost folosit in versiunea anterioara a aplicatiei (fara parola salvata)
-     * isi poate seta acum parola o singura data; un cont cu parola deja salvata e refuzat.
-     */
-    suspend fun registerAccount(email: String, passwordHash: String): RegisterResult {
-        val existing = userDao.findByEmail(normalize(email))
-        if (existing != null) {
-            if (existing.isBlocked) return RegisterResult.BLOCKED
-            if (existing.passwordHash.isNotEmpty()) return RegisterResult.ALREADY_EXISTS
-        }
-        saveCredentials(email, existing?.ownerKey ?: email, passwordHash)
-        return RegisterResult.CREATED
-    }
 
     /** true daca un admin a blocat contul cu acest e-mail. */
     suspend fun isBlocked(email: String): Boolean =
@@ -167,25 +167,36 @@ class RoleRepository(
     }
 
     // ---------- Administrare (doar ADMIN) ----------
+    // Rolurile si blocarea se schimba PE SERVER (sursa de adevar), apoi se copiaza in baza locala;
+    // lista din ecranul Administrare se actualizeaza singura (Flow din Room).
 
     private suspend fun requireAdmin(): UserEntity? =
         currentUserOnce()?.takeIf { it.role == UserRole.ADMIN && !it.isBlocked }
 
+    /**
+     * Aduce lista de utilizatori de pe server in baza locala. Intoarce un mesaj de eroare
+     * (ex. offline: se vede lista salvata) sau null la succes.
+     */
+    suspend fun refreshUsersFromServer(): String? {
+        requireAdmin() ?: return "Doar administratorii pot vedea utilizatorii."
+        return try {
+            apiCall { userService.list() }.forEach { saveRemoteUser(it) }
+            null
+        } catch (e: OfflineException) {
+            "Ești offline: se afișează utilizatorii salvați pe telefon."
+        } catch (e: Exception) {
+            e.toUserMessage("Lista de utilizatori nu a putut fi actualizată.")
+        }
+    }
+
     /** Schimba rolul unui utilizator. Intoarce un mesaj de eroare sau null la succes. */
     suspend fun changeRole(email: String, newRole: String): String? {
-        val admin = requireAdmin() ?: return "Doar administratorii pot schimba rolurile."
+        requireAdmin() ?: return "Doar administratorii pot schimba rolurile."
         val target = userDao.findByEmail(email) ?: return "Utilizatorul nu mai există."
         if (newRole == UserRole.ADMIN && target.provider == AuthProvider.ANONYMOUS) {
             return "Un vizitator anonim nu poate deveni administrator."
         }
-        if (target.role == UserRole.ADMIN && newRole == UserRole.USER &&
-            !target.isBlocked && userDao.countActiveAdmins() <= 1
-        ) {
-            return "Trebuie să rămână cel puțin un administrator activ."
-        }
-        Log.d(TAG, "${admin.email} changed role of ${target.email} to $newRole")
-        userDao.setRole(email, newRole)
-        return null
+        return updateOnServer(target, mapOf("role" to newRole))
     }
 
     /** Blocheaza / deblocheaza un cont. Intoarce un mesaj de eroare sau null la succes. */
@@ -193,10 +204,43 @@ class RoleRepository(
         val admin = requireAdmin() ?: return "Doar administratorii pot bloca utilizatori."
         if (admin.email == email) return "Nu vă puteți bloca propriul cont."
         val target = userDao.findByEmail(email) ?: return "Utilizatorul nu mai există."
-        if (blocked && target.role == UserRole.ADMIN && userDao.countActiveAdmins() <= 1) {
-            return "Trebuie să rămână cel puțin un administrator activ."
+        return updateOnServer(target, mapOf("blocked" to blocked))
+    }
+
+    private suspend fun updateOnServer(target: UserEntity, changes: Map<String, Any>): String? {
+        // conturile create doar offline nu exista inca pe server
+        val serverId = target.ownerKey.toIntOrNull()
+            ?: return "Contul ${target.email} nu există încă pe server (a fost folosit doar offline)."
+        return try {
+            val updated = apiCall { userService.update(serverId, changes) }
+            saveRemoteUser(updated)
+            Log.d(TAG, "${target.email} actualizat pe server: $changes")
+            null
+        } catch (e: OfflineException) {
+            "Ești offline. Rolurile și blocarea se pot schimba doar cu conexiune la server."
+        } catch (e: Exception) {
+            e.toUserMessage("Modificarea nu a putut fi salvată pe server.")
         }
-        userDao.setBlocked(email, blocked)
-        return null
+    }
+
+    /** Copiaza un cont venit de pe server in baza locala (pastrand hash-ul parolei, daca exista). */
+    private suspend fun saveRemoteUser(remote: RemoteUser) {
+        val email = normalize(remote.email)
+        val existing = userDao.findByEmail(email)
+        userDao.upsert(
+            existing?.copy(
+                ownerKey = remote.id.toString(),
+                role = remote.role ?: existing.role,
+                provider = remote.provider ?: existing.provider,
+                isBlocked = remote.blocked
+            ) ?: UserEntity(
+                email = email,
+                ownerKey = remote.id.toString(),
+                displayName = if (remote.provider == AuthProvider.ANONYMOUS) "Vizitator" else email.substringBefore("@"),
+                role = remote.role ?: UserRole.USER,
+                provider = remote.provider ?: AuthProvider.EMAIL,
+                isBlocked = remote.blocked
+            )
+        )
     }
 }

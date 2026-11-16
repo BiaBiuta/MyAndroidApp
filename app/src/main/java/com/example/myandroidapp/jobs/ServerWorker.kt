@@ -1,8 +1,7 @@
 package com.example.myandroidapp.jobs
 
+import android.util.Log
 import android.content.Context
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myandroidapp.MyApplication
@@ -52,49 +51,19 @@ class ServerWorker(
             description = description
         )
 
-        return if (isOnline(applicationContext)) {
-            // Trimite datele către server
-            try {
-                item = item.copy(isNotSaved = false)
-                if (isSaving) {
-                    itemRepository.save(item) // Salvare pe server
-                } else {
-                    itemRepository.update(item) // Actualizare pe server
-                }
-                Result.success()
-            } catch (e: Exception) {
-                // Serverul nu raspunde (oprit / IP gresit): pastram postarea local, ca sa apara
-                // imediat in lista; se trimite automat la reconectare (syncUnsynced).
-                e.printStackTrace()
-                if (isSaving) {
-                    try {
-                        itemRepository.saveToLocal(item.copy(isNotSaved = true))
-                        Result.success()
-                    } catch (e2: Exception) {
-                        e2.printStackTrace()
-                        Result.failure()
-                    }
-                } else {
-                    Result.retry()
-                }
+        // Repository-ul decide: trimite pe server sau, daca serverul nu raspunde, pune in coada
+        return try {
+            if (isSaving) {
+                val result = itemRepository.createPost(item.copy(isNotSaved = false))
+                Log.d("ServerWorker", "postare noua: $result")
+            } else {
+                itemRepository.update(item.copy(isNotSaved = false))
             }
-        } else {
-            // Salvează datele local
-            item = item.copy(isNotSaved = true)
-            try {
-                itemRepository.saveToLocal(item) // Asigură-te că `saveToLocal` este implementat în DAO
-                Result.success()
-            } catch (e: Exception) {
-                e.printStackTrace()
-                Result.failure()
-            }
+            Result.success()
+        } catch (e: Exception) {
+            // ex. serverul a refuzat postarea (date invalide, cont fara drept de publicare)
+            Log.w("ServerWorker", "postarea nu a putut fi salvata", e)
+            Result.failure()
         }
-    }
-    private fun isOnline(context: Context): Boolean {
-        val connectivityManager =
-            context.getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val network = connectivityManager.activeNetwork ?: return false
-        val capabilities = connectivityManager.getNetworkCapabilities(network) ?: return false
-        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
     }
 }

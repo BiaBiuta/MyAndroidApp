@@ -4,62 +4,74 @@ import androidx.room.Dao
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
+import androidx.room.Transaction
 import androidx.room.Update
 import com.example.myandroidapp.todo.data.Post
 
 import kotlinx.coroutines.flow.Flow
 
 @Dao
-interface ItemDao {
+abstract class ItemDao {
     // Lista principala: DOAR postarile publice. Postarile private nu apar aici niciodata.
     // Postarile sterse de autor / admin (hidden_posts) nu mai apar.
     @Query(
         "SELECT * FROM Posts WHERE isPrivate = 0 " +
                 "AND id NOT IN (SELECT postId FROM hidden_posts) ORDER BY created_at DESC"
     )
-    fun getAll(): Flow<List<Post>>
+    abstract fun getAll(): Flow<List<Post>>
 
     // "Postarile mele" (rol USER): postarile publice ale unui utilizator
     @Query(
         "SELECT * FROM Posts WHERE isPrivate = 0 AND user_id = :ownerKey " +
                 "AND id NOT IN (SELECT postId FROM hidden_posts) ORDER BY created_at DESC"
     )
-    fun getPublicByOwner(ownerKey: String): Flow<List<Post>>
+    abstract fun getPublicByOwner(ownerKey: String): Flow<List<Post>>
 
     // Sectiunea privata: doar postarile private ale proprietarului dat.
     @Query("SELECT * FROM Posts WHERE isPrivate = 1 AND user_id = :ownerKey ORDER BY created_at DESC")
-    fun getPrivate(ownerKey: String): Flow<List<Post>>
+    abstract fun getPrivate(ownerKey: String): Flow<List<Post>>
 
     // Editare: postarea dupa id
     @Query("SELECT * FROM Posts WHERE id = :id")
-    suspend fun findById(id: String): Post?
+    abstract suspend fun findById(id: String): Post?
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(item: Post)
+    abstract suspend fun insert(item: Post)
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insert(items: List<Post>)
+    abstract suspend fun insert(items: List<Post>)
 
     @Update
-    suspend fun update(item: Post): Int
+    abstract suspend fun update(item: Post): Int
 
     // Sterge doar postarile publice (cele venite de pe server). Cele private raman,
     // ca utilizatorul sa le regaseasca dupa ce se logheaza din nou.
     @Query("DELETE FROM Posts WHERE isPrivate = 0")
-    suspend fun deleteAllPublic(): Unit
+    abstract suspend fun deleteAllPublic(): Unit
 
     // La refresh: inlocuim postarile publice venite de pe server, dar NU pe cele
     // create pe telefon si inca netrimise (isNotSaved = 1), ca sa nu se piarda.
     @Query("DELETE FROM Posts WHERE isPrivate = 0 AND isNotSaved = 0")
-    suspend fun deleteAllPublicSynced(): Unit
+    abstract suspend fun deleteAllPublicSynced(): Unit
+
+    // Refresh de pe server intr-o singura tranzactie: lista din UI nu apare goala intre pasi
+    @Transaction
+    open suspend fun replacePublicSynced(posts: List<Post>) {
+        deleteAllPublicSynced()
+        insert(posts)
+    }
+
+    // Postarile din coada (create offline, inca netrimise) - pentru bannerul offline
+    @Query("SELECT COUNT(*) FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0")
+    abstract fun observeUnsyncedCount(): Flow<Int>
 
     @Query("DELETE FROM Posts WHERE id = :id")
-    suspend fun deleteById(id: String): Unit
+    abstract suspend fun deleteById(id: String): Unit
 
     // Postarile private nu se trimit niciodata pe server
     @Query("SELECT * FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0")
-    suspend fun getUnsyncedItems(): List<Post>
+    abstract suspend fun getUnsyncedItems(): List<Post>
 
     @Query("UPDATE Posts SET isNotSaved = 0 WHERE id = :id")
-    suspend fun markAsSynced(id: String)
+    abstract suspend fun markAsSynced(id: String)
 }

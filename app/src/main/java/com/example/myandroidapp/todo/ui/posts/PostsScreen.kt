@@ -1,5 +1,10 @@
 package com.example.myapplication.todo.ui.items
 
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.material.icons.filled.CloudUpload
+import androidx.compose.material.icons.filled.CloudOff
 import MyLocationViewModel
 import android.app.Application
 import android.util.Log
@@ -72,6 +77,8 @@ fun PostsScreen(
     onEditPost: (id: String) -> Unit = {},
     // comutatorul de amprenta: vizibil doar pentru sesiunile salvate (login cu e-mail si parola)
     showBiometricToggle: Boolean = false,
+    // sesiune creata fara server (login verificat in baza locala): trebuie reconectare pentru sincronizare
+    offlineSession: Boolean = false,
     biometricEnabled: Boolean = false,
     onBiometricToggle: (enabled: Boolean) -> Unit = {}
 ) {
@@ -193,6 +200,23 @@ fun PostsScreen(
                 onOpenMyReports = onOpenMyReports,
                 onOpenAdmin = onOpenAdmin
             )
+            // Starea retelei: offline (datele salvate), postari in coada, sesiune fara server
+            val pendingCount by itemsViewModel.pendingCount.collectAsStateWithLifecycle()
+            ConnectivityBanner(
+                isOnline = myNetworkStatusViewModel.uiState,
+                pendingCount = pendingCount,
+                offlineSession = offlineSession,
+                onReconnect = onLogout
+            )
+            // Cand revine reteaua, lista se reincarca singura de pe server
+            var wasOffline by remember { mutableStateOf(false) }
+            LaunchedEffect(myNetworkStatusViewModel.uiState) {
+                if (!myNetworkStatusViewModel.uiState) wasOffline = true
+                else if (wasOffline) {
+                    wasOffline = false
+                    itemsViewModel.loadItems()
+                }
+            }
             if (itemsViewModel.isRefreshing) {
                 LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
             }
@@ -369,6 +393,58 @@ fun PreviewPostsScreen() {
     PostsScreen(onItemClick = {}, onAddItem = {}, onLogout = {})
 }
 
+
+/**
+ * Bannerul de conectivitate de deasupra listei:
+ *  - offline: se vad postarile salvate pe telefon (cache), iar cele noi asteapta in coada;
+ *  - online, cu postari in coada: se trimit acum;
+ *  - sesiune creata fara server (login offline): trebuie reconectare ca sa se sincronizeze.
+ * Starea e spusa in text, nu doar prin culoare / iconita.
+ */
+@Composable
+private fun ConnectivityBanner(
+    isOnline: Boolean,
+    pendingCount: Int,
+    offlineSession: Boolean,
+    onReconnect: () -> Unit
+) {
+    val pending = when (pendingCount) {
+        0 -> ""
+        1 -> " O postare așteaptă să fie trimisă."
+        else -> " $pendingCount postări așteaptă să fie trimise."
+    }
+    val (icon, text) = when {
+        !isOnline -> Icons.Default.CloudOff to
+                "Ești offline. Vezi postările salvate pe telefon; cele noi se trimit când revine conexiunea.$pending"
+        offlineSession -> Icons.Default.CloudOff to
+                "Ești conectat fără server (login offline). Conectează-te din nou ca să sincronizezi.$pending"
+        pendingCount > 0 -> Icons.Default.CloudUpload to "Se trimit postările salvate offline…$pending"
+        else -> return
+    }
+    androidx.compose.material3.Surface(
+        color = androidx.compose.material3.MaterialTheme.colorScheme.tertiaryContainer,
+        contentColor = androidx.compose.material3.MaterialTheme.colorScheme.onTertiaryContainer,
+        modifier = Modifier
+            .fillMaxWidth()
+            .semantics { liveRegion = LiveRegionMode.Polite }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, modifier = Modifier.size(20.dp))
+            Spacer(modifier = Modifier.width(12.dp))
+            androidx.compose.material3.Text(
+                text = text,
+                style = androidx.compose.material3.MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f)
+            )
+            if (isOnline && offlineSession) {
+                TextButton(onClick = onReconnect) { Text("Reconectare") }
+            }
+        }
+    }
+}
 
 /**
  * Banda de sub bara de sus: rolul curent si butoanele catre functionalitatile unice ale rolului.

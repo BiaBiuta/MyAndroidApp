@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.ui.admin
 
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import com.example.myandroidapp.core.data.remote.OfflineException
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -46,8 +48,22 @@ class AdminViewModel(
 
     var busy by mutableStateOf(false)
         private set
+
+    /** Aduce utilizatorii de pe server; offline, se vede lista salvata pe telefon. */
+    fun refreshUsers() {
+        viewModelScope.launch {
+            busy = true
+            userRepository.refreshUsersFromServer()?.let { message = it }
+            busy = false
+        }
+    }
     var message by mutableStateOf<String?>(null)
         private set
+
+    init {
+        // lista de utilizatori vine de pe server (rolurile si blocarea sunt pe server)
+        refreshUsers()
+    }
 
     fun consumeMessage() {
         message = null
@@ -64,7 +80,8 @@ class AdminViewModel(
                 block() ?: success
             } catch (e: Exception) {
                 Log.w("AdminViewModel", "admin action failed", e)
-                "Acțiunea nu a putut fi finalizată."
+                if (e is OfflineException) "Ești offline. Această acțiune are nevoie de conexiune la server."
+                else e.toUserMessage("Acțiunea nu a putut fi finalizată.")
             }
             busy = false
         }

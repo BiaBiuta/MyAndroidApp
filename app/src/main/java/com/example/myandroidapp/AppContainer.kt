@@ -6,6 +6,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import com.example.myandroidapp.auth.data.AuthRepository
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.remote.AuthDataSource
+import com.example.myandroidapp.auth.data.remote.UserService
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferencesRepository
@@ -13,6 +14,7 @@ import com.example.myandroidapp.todo.data.PostRepository
 import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
 import com.example.myapp.MyAppDatabase
+import kotlinx.coroutines.flow.first
 
 //import com.example.myapplication.MyAppDatabase
 //import com.example.myapplication.auth.data.AuthRepository
@@ -43,11 +45,17 @@ class AppContainer(val context: Context) {
     //initialization
     //*
     val postRepository: PostRepository by lazy {
-        PostRepository(postService, postWsClient, database.itemDao(), database.moderationDao())
+        PostRepository(
+            postService,
+            postWsClient,
+            database.itemDao(),
+            database.moderationDao(),
+            currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey }
+        )
     }
 
     val authRepository: AuthRepository by lazy {
-        AuthRepository(authDataSource)
+        AuthRepository(authDataSource, roleRepository)
     }
 
     val userPreferencesRepository: UserPreferencesRepository by lazy {
@@ -56,6 +64,10 @@ class AppContainer(val context: Context) {
 
     // Rolurile (USER / ADMIN) ale conturilor, in baza de date locala
     val roleRepository: RoleRepository by lazy {
-        RoleRepository(database.userDao(), userPreferencesRepository)
+        RoleRepository(
+            database.userDao(),
+            userPreferencesRepository,
+            Api.retrofit.create(UserService::class.java)
+        )
     }
 }

@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.ui.edit
 
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import com.example.myandroidapp.core.data.remote.OfflineException
 import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
@@ -159,12 +161,17 @@ class EditPostViewModel(
                     savedMessage = when (result) {
                         PostRepository.UpdateResult.SAVED -> "Postarea a fost actualizată."
                         PostRepository.UpdateResult.SAVED_LOCALLY_ONLY ->
-                            "Postarea a fost actualizată pe telefon (serverul nu este disponibil acum)."
+                            "Postarea a fost actualizată; se trimite pe server când revine conexiunea."
                     }
                 )
             } catch (e: Exception) {
                 Log.w(TAG, "save failed", e)
-                uiState = uiState.copy(saving = false, error = "Modificările nu au putut fi salvate.")
+                uiState = uiState.copy(
+                    saving = false,
+                    error = if (e is OfflineException)
+                        "Ești offline. Editarea are nevoie de conexiune la server; încearcă din nou mai târziu."
+                    else e.toUserMessage("Modificările nu au putut fi salvate.")
+                )
             }
         }
     }

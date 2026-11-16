@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.ui.myposts
 
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import com.example.myandroidapp.core.data.remote.OfflineException
 import android.util.Log
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -80,7 +82,9 @@ class MyPostsViewModel(
                 message = "Postarea a fost ștearsă."
             } catch (e: Exception) {
                 Log.w("MyPostsViewModel", "delete failed", e)
-                message = "Postarea nu a putut fi ștearsă."
+                message = if (e is OfflineException)
+                    "Ești offline. Ștergerea are nevoie de conexiune la server."
+                else e.toUserMessage("Postarea nu a putut fi ștearsă.")
             }
         }
     }

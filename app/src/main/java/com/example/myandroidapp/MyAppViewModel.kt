@@ -12,11 +12,13 @@ import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.core.data.remote.Api
+import com.example.myandroidapp.core.data.remote.SessionEnd
 import com.example.myandroidapp.todo.data.PostRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import com.example.myandroidapp.auth.data.AuthRepository
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import kotlinx.coroutines.flow.combine
@@ -43,7 +45,8 @@ sealed interface SessionState {
 class MyAppViewModel(
     private val userPreferencesRepository: UserPreferencesRepository,
     private val postRepository: PostRepository,
-    private val roleRepository: RoleRepository
+    private val roleRepository: RoleRepository,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     /** Contul logat, cu rolul lui (USER / ADMIN), din baza de date locala. Se actualizeaza live. */
@@ -89,6 +92,18 @@ class MyAppViewModel(
                 if (user?.isBlocked == true) {
                     _notice.value = RoleRepository.BLOCKED_MESSAGE
                     logout {}
+                }
+            }
+        }
+        viewModelScope.launch {
+            // Serverul a respins sesiunea (token expirat / revocat, sau cont blocat) -> login din nou
+            Api.tokenInterceptor.sessionEnded.collect { reason ->
+                if (userPreferencesRepository.userPreferencesStream.first().token.isNotEmpty()) {
+                    _notice.value = when (reason) {
+                        SessionEnd.BLOCKED -> RoleRepository.BLOCKED_MESSAGE
+                        SessionEnd.EXPIRED -> "Sesiunea a expirat. Conectați-vă din nou."
+                    }
+                    logout(revokeOnServer = false) {}
                 }
             }
         }
@@ -143,13 +158,23 @@ class MyAppViewModel(
         }
     }
 
-    /** Sterge complet sesiunea si token-ul, apoi apeleaza onLoggedOut (navigare la login). */
-    fun logout(onLoggedOut: () -> Unit) {
+    private var loggingOut = false
+
+    /**
+     * Logout: token-ul e revocat pe server (daca e disponibil) si sters de pe telefon,
+     * impreuna cu sesiunea salvata; apoi onLoggedOut (navigare la login).
+     * [revokeOnServer] = false cand serverul a respins deja token-ul (sesiune expirata).
+     */
+    fun logout(revokeOnServer: Boolean = true, onLoggedOut: () -> Unit) {
+        if (loggingOut) return
+        loggingOut = true
         viewModelScope.launch {
+            if (revokeOnServer) authRepository.logout() else Api.tokenInterceptor.token = null
             // token, user si flag-ul biometric sunt sterse (UserPreferences() = valori goale)
             userPreferencesRepository.save(UserPreferences())
-            Api.tokenInterceptor.token = null
+            postRepository.setToken("")
             unlocked.value = false
+            loggingOut = false
             try {
                 postRepository.deleteAll()
             } catch (e: Exception) {
@@ -174,7 +199,8 @@ class MyAppViewModel(
                 MyAppViewModel(
                     app.container.userPreferencesRepository,
                     app.container.postRepository,
-                    app.container.roleRepository
+                    app.container.roleRepository,
+                    app.container.authRepository
                 )
             }
         }

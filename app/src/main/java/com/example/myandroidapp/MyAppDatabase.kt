@@ -117,6 +117,19 @@ abstract class MyAppDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * La fiecare deschidere a bazei de date: pozele mai mari de ~1 MB (text Base64) se golesc.
+         * SQLite pe Android nu poate citi un rand mai mare de ~2 MB ("Row too big to fit into
+         * CursorWindow"), iar o singura postare cu poza uriasa (ex. salvata de o versiune veche,
+         * inainte ca pozele sa fie micsorate) ar opri aplicatia la fiecare pornire.
+         * length() se calculeaza in SQLite, fara sa citeasca randul in memorie.
+         */
+        private val REPAIR_OVERSIZED_PHOTOS = object : RoomDatabase.Callback() {
+            override fun onOpen(db: SupportSQLiteDatabase) {
+                db.execSQL("UPDATE Posts SET photo = '' WHERE length(photo) > 1000000")
+            }
+        }
+
         fun getDatabase(context: Context): MyAppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -125,6 +138,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     "app_database"
                 ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .fallbackToDestructiveMigration()
+                    .addCallback(REPAIR_OVERSIZED_PHOTOS)
                     .build()
                 INSTANCE = instance
                 instance

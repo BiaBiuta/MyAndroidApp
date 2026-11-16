@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.ui.posts
 
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import com.example.myandroidapp.core.data.remote.OfflineException
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -71,6 +73,10 @@ class PostsViewModel(
     var isRefreshing by mutableStateOf(false)
         private set
 
+    /** Postarile create offline care asteapta sa fie trimise pe server (bannerul offline). */
+    val pendingCount: StateFlow<Int> = postRepository.pendingCount()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
+
     // Confirmari / erori scurte (snackbar): "Postare ștearsă", "Raportare trimisă" etc.
     var message by mutableStateOf<String?>(null)
         private set
@@ -85,7 +91,8 @@ class PostsViewModel(
         if (isRefreshing) return
         viewModelScope.launch {
             isRefreshing = true
-            postRepository.refresh()
+            // null = actualizat de pe server; altfel mesajul (ex. offline: se vad postarile salvate)
+            postRepository.refresh()?.let { message = it }
             isRefreshing = false
         }
     }
@@ -115,14 +122,15 @@ class PostsViewModel(
             }
             try {
                 // Adminul sterge postarea altcuiva -> autorul primeste un mesaj
-                if (user.isAdmin && post.user_id != user.ownerKey) {
-                    postRepository.notifyAuthorOfRemoval(post.id, user.email, AdminViewModel.DEFAULT_AUTHOR_MESSAGE)
-                }
-                postRepository.deletePost(post.id, user.email)
+                val authorMessage = if (user.isAdmin && post.user_id != user.ownerKey)
+                    AdminViewModel.DEFAULT_AUTHOR_MESSAGE else null
+                postRepository.deletePost(post.id, user.email, authorMessage)
                 message = "Postarea a fost ștearsă."
             } catch (e: Exception) {
                 Log.w(TAG, "delete failed", e)
-                message = "Postarea nu a putut fi ștearsă."
+                message = if (e is OfflineException)
+                    "Ești offline. Ștergerea are nevoie de conexiune la server."
+                else e.toUserMessage("Postarea nu a putut fi ștearsă.")
             }
         }
     }

@@ -108,6 +108,7 @@ fun MyAppNavHost() {
                 onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
                 // vizitatorul anonim nu are ce debloca cu amprenta
                 showBiometricToggle = sessionState is SessionState.Active && currentUser?.isGuest != true,
+                offlineSession = (sessionState as? SessionState.Active)?.token?.startsWith("local-") == true,
                 biometricEnabled = biometricEnabled,
                 onBiometricToggle = { enabled -> myAppViewModel.setBiometricEnabled(appContext, enabled) })
         }

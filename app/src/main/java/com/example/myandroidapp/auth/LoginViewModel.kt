@@ -6,13 +6,10 @@ import androidx.biometric.BiometricManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.myandroidapp.MyApplication
-import com.example.myandroidapp.auth.data.RoleRepository
+import com.example.myandroidapp.auth.data.AuthRepository
 import com.example.myandroidapp.auth.data.local.AuthProvider
-import com.example.myandroidapp.auth.data.remote.User
-import com.example.myandroidapp.core.PasswordHasher
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.UserPreferences
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,7 +17,6 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.withContext
 
 /** Metoda de autentificare aflata in curs -> doar butonul ei arata indicatorul de incarcare. */
 enum class AuthMethod(val provider: String) {
@@ -216,46 +212,32 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 it.copy(isAuthenticating = true, activeMethod = AuthMethod.EMAIL, generalErrorMessage = null)
             }
 
-            // Hash-ul parolei (PBKDF2 cu salt): se salveaza in baza de date locala.
-            // Parola in clar nu se salveaza niciodata.
-            val passwordHash = withContext(Dispatchers.Default) { PasswordHasher.hash(state.password) }
-
-            // Autentificarea NU creeaza conturi; doar Inregistrarea creeaza.
-            val (session, failureMessage) = try {
-                if (state.isLoginMode) loginWithEmail(state.email, state.password, passwordHash)
-                else registerAccount(state.email, passwordHash)
+            // Repository-ul decide: server (token JWT) sau, daca serverul nu raspunde, baza locala
+            val result = try {
+                if (state.isLoginMode) authRepository.login(state.email, state.password)
+                else authRepository.register(state.email, state.password)
             } catch (e: Exception) {
                 Log.w(TAG, "auth failed", e)
-                null to "A apărut o eroare neașteptată. Încercați din nou."
+                AuthRepository.AuthResult.Failure(
+                    "A apărut o eroare neașteptată. Încercați din nou.",
+                    AuthRepository.Reason.REJECTED
+                )
             }
 
-            if (session == null) {
-                var message = failureMessage
-                if (state.isLoginMode && failureMessage == INVALID_CREDENTIALS) {
-                    val lockMs = loginThrottle.registerFailure(state.email)
-                    if (lockMs > 0) {
-                        _uiState.update { it.copy(isAuthenticating = false, activeMethod = null, password = "") }
-                        startLockoutCountdown(state.email)
-                        return@launch
-                    }
-                    val left = loginThrottle.attemptsLeft(state.email)
-                    if (left <= 2) {
-                        message = "$INVALID_CREDENTIALS " +
-                                if (left == 1) "Mai ai o singură încercare." else "Mai ai $left încercări."
-                    }
+            val session = when (result) {
+                is AuthRepository.AuthResult.Success -> result.session
+                is AuthRepository.AuthResult.Failure -> {
+                    onEmailAuthFailed(state, result)
+                    return@launch
                 }
-                _uiState.update {
-                    it.copy(
-                        isAuthenticating = false,
-                        activeMethod = null,
-                        generalErrorMessage = message,
-                        // parola gresita nu ramane in camp (si nici in memorie)
-                        password = if (it.isLoginMode) "" else it.password
-                    )
-                }
-                return@launch
             }
-            if (state.isLoginMode) loginThrottle.registerSuccess(state.email)
+            if (state.isLoginMode) {
+                loginThrottle.registerSuccess(state.email)
+            } else {
+                // cont NOU (chiar daca adresa a mai fost folosita pe telefon): dialogul de amprenta
+                // trebuie sa apara din nou, nu se reaplica alegerea unui cont vechi
+                biometricChoices.forget(session.email)
+            }
             // dupa login reusit, parola nu mai ramane in starea ecranului
             _uiState.update {
                 it.copy(
@@ -272,84 +254,41 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     /**
-     * Autentificare. NU creeaza conturi noi:
-     *  1. serverul verifica e-mailul si parola -> sesiune cu token de la server;
-     *  2. daca serverul nu raspunde, contul si parola se verifica in baza de date locala
-     *     (hash-ul salvat la inregistrare / la login-urile anterioare).
-     * Intoarce sesiunea, sau null + mesajul de eroare.
+     * Login / inregistrare esuate: mesajul pentru utilizator si, la parola gresita,
+     * numaratoarea incercarilor (blocare temporara dupa prea multe, si pe telefon, si pe server).
      */
-    private suspend fun loginWithEmail(
-        email: String,
-        password: String,
-        passwordHash: String
-    ): Pair<UserPreferences?, String> {
-        if (roleRepository.isBlocked(email)) return null to RoleRepository.BLOCKED_MESSAGE
-
-        val result = authRepository.login(email, password)
-        val tokenHolder = result.getOrNull()
-        val error = result.exceptionOrNull()
-
-        if (tokenHolder != null) {
-            val session = UserPreferences(
-                email = email,
-                token = tokenHolder.token,
-                user = tokenHolder.user,
-                passwordHash = passwordHash
+    private fun onEmailAuthFailed(state: LoginUiState, failure: AuthRepository.AuthResult.Failure) {
+        var message = failure.message
+        when (failure.reason) {
+            AuthRepository.Reason.LOCKED -> {
+                // serverul a blocat temporar contul (429): numaratoare inversa cu timpul primit
+                _uiState.update { it.copy(isAuthenticating = false, activeMethod = null, password = "") }
+                startCountdown((failure.retryAfterSeconds ?: 30) * 1000L) { failure.message }
+                return
+            }
+            AuthRepository.Reason.INVALID_CREDENTIALS -> if (state.isLoginMode) {
+                val lockMs = loginThrottle.registerFailure(state.email)
+                if (lockMs > 0) {
+                    _uiState.update { it.copy(isAuthenticating = false, activeMethod = null, password = "") }
+                    startLockoutCountdown(state.email)
+                    return
+                }
+                val left = loginThrottle.attemptsLeft(state.email)
+                if (left <= 2) {
+                    message = "$INVALID_CREDENTIALS " +
+                            if (left == 1) "Mai ai o singură încercare." else "Mai ai $left încercări."
+                }
+            }
+            else -> Unit
+        }
+        _uiState.update {
+            it.copy(
+                isAuthenticating = false,
+                activeMethod = null,
+                generalErrorMessage = message,
+                // parola gresita nu ramane in camp (si nici in memorie)
+                password = if (it.isLoginMode) "" else it.password
             )
-            // contul confirmat de server ajunge si in baza locala, pentru login-ul offline
-            roleRepository.saveCredentials(email, session.ownerKey, passwordHash)
-            return session to ""
-        }
-
-        if (error !is java.io.IOException) {
-            // Serverul a raspuns, dar a respins datele (ex. 401)
-            Log.w(TAG, "login refused by server", error)
-            return null to INVALID_CREDENTIALS
-        }
-
-        // Serverul nu poate fi contactat -> verificare in baza de date locala
-        return when (roleRepository.checkOffline(email, password)) {
-            RoleRepository.OfflineCheck.VALID -> {
-                val account = roleRepository.findAccount(email)
-                // inlocuim hash-ul vechi cu unul nou (algoritmul si iteratiile curente)
-                if (account != null) roleRepository.saveCredentials(email, account.ownerKey, passwordHash)
-                UserPreferences(
-                    email = email,
-                    token = "local-" + java.util.UUID.randomUUID().toString(),
-                    // pastram id-ul de pe server (daca exista), ca postarile contului sa ramana ale lui
-                    user = User(email, "", account?.ownerKey?.toIntOrNull() ?: 0),
-                    passwordHash = passwordHash
-                ) to ""
-            }
-            // Acelasi mesaj pentru cont inexistent si parola gresita: altfel un atacator
-            // ar putea afla ce adrese de e-mail au cont in aplicatie (user enumeration).
-            RoleRepository.OfflineCheck.UNKNOWN_ACCOUNT,
-            RoleRepository.OfflineCheck.WRONG_PASSWORD ->
-                null to INVALID_CREDENTIALS
-            RoleRepository.OfflineCheck.BLOCKED ->
-                null to RoleRepository.BLOCKED_MESSAGE
-        }
-    }
-
-    /**
-     * Inregistrare: contul nou se creeaza in baza de date locala, cu hash-ul parolei.
-     * Daca e-mailul are deja cont, inregistrarea e refuzata.
-     */
-    private suspend fun registerAccount(email: String, passwordHash: String): Pair<UserPreferences?, String> {
-        return when (roleRepository.registerAccount(email, passwordHash)) {
-            RoleRepository.RegisterResult.ALREADY_EXISTS ->
-                null to "Există deja un cont cu acest e-mail. Folosiți tab-ul Autentificare."
-            RoleRepository.RegisterResult.BLOCKED ->
-                null to RoleRepository.BLOCKED_MESSAGE
-            RoleRepository.RegisterResult.CREATED -> {
-                val account = roleRepository.findAccount(email)
-                UserPreferences(
-                    email = email,
-                    token = "local-" + java.util.UUID.randomUUID().toString(),
-                    user = User(email, "", account?.ownerKey?.toIntOrNull() ?: 0),
-                    passwordHash = passwordHash
-                ) to ""
-            }
         }
     }
 
@@ -401,45 +340,34 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         signInLocally(method, trimmed, onSessionUnlocked)
     }
 
-    /** Vizitator anonim: acelasi cont local de vizitator pe acest telefon (GuestIdentity). */
+    /** Vizitator anonim: acelasi cont de vizitator (server + baza locala) pe acest telefon. */
     fun signInAnonymously(onSessionUnlocked: () -> Unit) =
-        signInLocally(AuthMethod.ANONYMOUS, guestIdentity.email(), onSessionUnlocked)
+        signInLocally(AuthMethod.ANONYMOUS, guestIdentity.id(), onSessionUnlocked)
 
-    private fun signInLocally(method: AuthMethod, email: String, onSessionUnlocked: () -> Unit) {
+    /**
+     * Google / Apple / anonim: AuthRepository trece prin server (token JWT) sau, offline,
+     * prin contul deja salvat pe telefon. [value] = adresa contului ales sau id-ul vizitatorului.
+     */
+    private fun signInLocally(method: AuthMethod, value: String, onSessionUnlocked: () -> Unit) {
         viewModelScope.launch {
             _uiState.update {
                 it.copy(isAuthenticating = true, activeMethod = method, generalErrorMessage = null)
             }
-            delay(700) // raspunsul simulat al furnizorului
             val result = try {
-                roleRepository.signInWithProvider(email, method.provider)
+                if (method == AuthMethod.ANONYMOUS) authRepository.signInAnonymously(value)
+                else authRepository.signInWithProvider(method.provider, value)
             } catch (e: Exception) {
                 Log.w(TAG, "provider sign-in failed", e)
-                null
+                AuthRepository.AuthResult.Failure(
+                    "Conectarea nu a reușit. Încercați din nou.",
+                    AuthRepository.Reason.REJECTED
+                )
             }
+            _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
             when (result) {
-                is RoleRepository.ProviderSignIn.Success -> {
-                    val user = result.user
-                    val session = UserPreferences(
-                        email = user.email,
-                        token = "local-" + method.provider.lowercase() + "-" + java.util.UUID.randomUUID(),
-                        // id-ul de pe server (daca exista) pastreaza postarile contului
-                        user = User(user.email, "", user.ownerKey.toIntOrNull() ?: 0),
-                        provider = method.provider
-                    )
-                    _uiState.update { it.copy(isAuthenticating = false, activeMethod = null) }
-                    finishSignIn(session, onSessionUnlocked)
-                }
-                RoleRepository.ProviderSignIn.Blocked -> _uiState.update {
-                    it.copy(isAuthenticating = false, activeMethod = null, generalErrorMessage = RoleRepository.BLOCKED_MESSAGE)
-                }
-                null -> _uiState.update {
-                    it.copy(
-                        isAuthenticating = false,
-                        activeMethod = null,
-                        generalErrorMessage = "Conectarea nu a reușit. Încercați din nou."
-                    )
-                }
+                is AuthRepository.AuthResult.Success -> finishSignIn(result.session, onSessionUnlocked)
+                is AuthRepository.AuthResult.Failure ->
+                    _uiState.update { it.copy(generalErrorMessage = result.message) }
             }
         }
     }
@@ -516,21 +444,22 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
      * Login blocat temporar: afisam cate secunde mai sunt si deblocam butonul la final.
      * Durata vine din [LoginThrottle], deci repornirea aplicatiei nu scurteaza blocarea.
      */
-    private fun startLockoutCountdown(email: String) {
+    private fun startLockoutCountdown(email: String) =
+        startCountdown(loginThrottle.remainingLockMs(email)) { seconds ->
+            "Prea multe încercări greșite. Din motive de securitate, poți încerca din nou peste $seconds s."
+        }
+
+    /** Butonul de login ramane blocat [durationMs], cu mesajul (actualizat la fiecare secunda). */
+    private fun startCountdown(durationMs: Long, message: (seconds: Int) -> String) {
         lockoutJob?.cancel()
         lockoutJob = viewModelScope.launch {
-            var remainingMs = loginThrottle.remainingLockMs(email)
+            val until = System.currentTimeMillis() + durationMs
+            var remainingMs = durationMs
             while (remainingMs > 0) {
                 val seconds = ((remainingMs + 999) / 1000).toInt()
-                _uiState.update {
-                    it.copy(
-                        lockoutSecondsLeft = seconds,
-                        generalErrorMessage = "Prea multe încercări greșite. Din motive de securitate, " +
-                                "poți încerca din nou peste $seconds s."
-                    )
-                }
+                _uiState.update { it.copy(lockoutSecondsLeft = seconds, generalErrorMessage = message(seconds)) }
                 delay(1000)
-                remainingMs = loginThrottle.remainingLockMs(email)
+                remainingMs = until - System.currentTimeMillis()
             }
             _uiState.update { it.copy(lockoutSecondsLeft = 0, generalErrorMessage = null) }
         }
@@ -538,6 +467,6 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     companion object {
         /** Acelasi mesaj pentru cont inexistent si parola gresita (fara user enumeration). */
-        const val INVALID_CREDENTIALS = "E-mail sau parolă incorecte."
+        const val INVALID_CREDENTIALS = AuthRepository.INVALID_CREDENTIALS
     }
 }

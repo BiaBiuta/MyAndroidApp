@@ -1,5 +1,6 @@
 package com.example.myandroidapp.core.data.remote
 
+import com.example.myandroidapp.BuildConfig
 import com.example.myandroidapp.todo.data.Location
 import com.example.myandroidapp.todo.data.LocationDeserializer
 import com.google.gson.GsonBuilder
@@ -8,30 +9,34 @@ import retrofit2.Retrofit
 import retrofit2.converter.gson.GsonConverterFactory
 import java.util.concurrent.TimeUnit
 
-//e un singleton => exista o singura instanta a sa
-//in toata aplicatia
+/**
+ * Punctul unic de acces la server (singleton): clientul HTTP, Retrofit si adresa WebSocket.
+ * Toate serviciile (AuthService, PostService, UserService) se creeaza din [retrofit],
+ * deci toate cererile trec prin [tokenInterceptor] (token-ul JWT se ataseaza automat).
+ */
 object Api {
-    private val url="192.168.1.7:3000"
-    private val httpUrl="http://$url/"
-    val wsUrl="ws://$url/"
-    private var gson=GsonBuilder()
-        .registerTypeAdapter(Location::class.java, LocationDeserializer())  // Adaugă adaptorul personalizat
-        .create()//pentru serializare si pentru deserializare
-    val tokenInterceptor= TokenInterceptor()//creez un token interceptor
-    //va fi unul singur pentru ac am o instanta
-    //va crea in mod dinamic
-    val retrofit = Retrofit.Builder()
-        .baseUrl(httpUrl)
-        .addConverterFactory(GsonConverterFactory.create(gson))
+    // Adresa vine din build.gradle.kts (SERVER_HOST), ex. "10.0.2.2:3000" pentru emulator
+    private val host = BuildConfig.SERVER_HOST
+    private val httpUrl = "http://$host/"
+    val wsUrl = "ws://$host/"
+
+    private val gson = GsonBuilder()
+        .registerTypeAdapter(Location::class.java, LocationDeserializer())
+        .create()
+
+    val tokenInterceptor = TokenInterceptor()
+
+    val okHttpClient: OkHttpClient = OkHttpClient.Builder()
+        .addInterceptor(tokenInterceptor)
+        // timp scurt de conectare: daca serverul nu raspunde, aplicatia trece repede pe datele salvate
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(30, TimeUnit.SECONDS)
+        .writeTimeout(60, TimeUnit.SECONDS) // pozele (Base64) pot fi mari
         .build()
 
-    val okHttpClient = OkHttpClient.Builder().apply {
-        this.addInterceptor(tokenInterceptor)
-//        this.connectTimeout(30, TimeUnit.SECONDS)  // Timeout pentru conexiune
-//        this.readTimeout(60, TimeUnit.SECONDS)     // Mărește timeout-ul de citire
-//        this.writeTimeout(60, TimeUnit.SECONDS)    // Timeout pentru trimiterea cererii
-        this.callTimeout(90, TimeUnit.SECONDS)     // Timeout general pentru apel
-    }.build()
-
-
+    val retrofit: Retrofit = Retrofit.Builder()
+        .baseUrl(httpUrl)
+        .client(okHttpClient)
+        .addConverterFactory(GsonConverterFactory.create(gson))
+        .build()
 }

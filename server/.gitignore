@@ -1,0 +1,3 @@
+# baza de date si secretul token-urilor: create la prima pornire, nu se pun pe GitHub
+data/
+node_modules/

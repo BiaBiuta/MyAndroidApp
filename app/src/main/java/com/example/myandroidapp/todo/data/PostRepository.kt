@@ -4,6 +4,11 @@ import android.util.Log
 import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.remote.Api
+import com.example.myandroidapp.core.data.remote.OfflineException
+import com.example.myandroidapp.core.data.remote.ServerException
+import com.example.myandroidapp.core.data.remote.TokenInterceptor
+import com.example.myandroidapp.core.data.remote.apiCall
+import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.todo.data.remote.Payload
 import com.example.myandroidapp.todo.data.remote.PostEvent
 import com.example.myandroidapp.todo.data.remote.PostService
@@ -18,7 +23,6 @@ import com.example.myandroidapp.todo.data.local.ModerationDao
 import com.example.myandroidapp.todo.data.local.ReportEntity
 import com.example.myandroidapp.todo.data.local.ReportedPost
 import com.example.myandroidapp.todo.data.local.ReportStatus
-import com.squareup.moshi.Moshi
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -35,15 +39,29 @@ import kotlinx.coroutines.withContext
 import kotlin.collections.List
 
 //post Service is an Rest item with 4 endpoints
+// ~1 MB de text Base64: sub limita de ~2 MB pe rand a SQLite pe Android
+private const val MAX_CACHED_PHOTO_CHARS = 1_000_000
+
+/**
+ * Postarile: serverul (REST + WebSocket) e sursa de adevar, iar baza de date locala (Room)
+ * e cache-ul din care citeste interfata. AICI se decide intre retea si cache:
+ *  - citire: UI-ul observa mereu Room (afisare instantanee, si offline); refresh() si
+ *    WebSocket-ul aduc datele de pe server in Room, iar lista se actualizeaza singura;
+ *  - creare: trimisa pe server, sau pusa in coada locala daca serverul nu raspunde
+ *    (se trimite automat la reconectare: SyncWorker / WebSocket);
+ *  - editare / stergere: doar cu serverul disponibil (altfel OfflineException, cu mesaj clar).
+ * ViewModel-urile nu stiu nimic despre retea.
+ */
 class PostRepository(
     private val postService: PostService,
     private val postWsClient: PostWsClient,
     private val itemDao: ItemDao,
-    private val moderationDao: ModerationDao
+    private val moderationDao: ModerationDao,
+    // cheia contului conectat acum (id-ul de pe server): doar postarile lui din coada se trimit
+    private val currentOwnerKey: suspend () -> String
 ) {
     private var posts: kotlin.collections.List<Post> = kotlin.collections.listOf()
 
-    private fun getBearerToken() = "Bearer ${Api.tokenInterceptor.token}"
 
     private var postsFlow: MutableSharedFlow<Result<List<Post>>> = MutableSharedFlow(
         replay = 1,
@@ -94,91 +112,89 @@ class PostRepository(
 
     suspend fun markNoticesRead(ownerKey: String) = moderationDao.markNoticesRead(ownerKey)
 
-    /**
-     * Salveaza mesajul pentru autorul unei postari sterse de admin. Se apeleaza INAINTE de
-     * stergere, cat timp postarea (textul, autorul) si raportarile ei inca exista.
-     */
-    suspend fun notifyAuthorOfRemoval(postId: String, adminId: String, message: String) {
-        val post = itemDao.findById(postId) ?: return
-        if (post.user_id.isBlank()) return
+    /** Mesajul pentru autorul unei postari sterse de admin (citit cat timp postarea inca exista). */
+    private suspend fun removalNotice(postId: String, adminId: String, message: String): AuthorNoticeEntity? {
+        val post = itemDao.findById(postId) ?: return null
+        if (post.user_id.isBlank()) return null
         val reasons = moderationDao.pendingReasons(postId).distinct().joinToString(" • ")
-        moderationDao.insertNotice(
-            AuthorNoticeEntity(
-                recipientKey = post.user_id,
-                postId = postId,
-                postSnippet = post.description.take(140),
-                reasons = reasons,
-                message = message,
-                adminId = adminId
-            )
+        return AuthorNoticeEntity(
+            recipientKey = post.user_id,
+            postId = postId,
+            postSnippet = post.description.take(140),
+            reasons = reasons,
+            message = message,
+            adminId = adminId
         )
     }
 
     /**
-     * Adminul da dreptate raportarilor: postarea e eliminata, cei care au raportat primesc
-     * raspunsul [reply], iar autorul postarii primeste mesajul [authorMessage].
+     * Adminul da dreptate raportarilor: postarea e eliminata (pe server), cei care au raportat
+     * primesc raspunsul [reply], iar autorul postarii primeste mesajul [authorMessage].
      */
     suspend fun resolveReportsByDeleting(postId: String, adminId: String, reply: String, authorMessage: String) {
-        notifyAuthorOfRemoval(postId, adminId, authorMessage)
-        moderationDao.answerReports(
-            postId = postId,
-            status = ReportStatus.RESOLVED,
-            reply = reply,
-            adminId = adminId,
-            resolvedAt = System.currentTimeMillis()
-        )
-        deletePost(postId, adminId)
+        deletePost(postId, adminId, authorMessage = authorMessage, reporterReply = reply)
     }
 
     /**
-     * Sterge o postare (autorul ei sau un admin). O ascundem local imediat, apoi
-     * incercam si pe server; daca serverul nu raspunde, ramane ascunsa pe acest telefon.
-     * Raportarile inca deschise ale postarii se inchid automat, cu un mesaj pentru cei care au raportat.
+     * Sterge o postare (autorul ei sau un admin). Intai pe SERVER: daca nu raspunde, arunca
+     * OfflineException si nu se schimba nimic (stergerea are nevoie de conexiune). Dupa ce
+     * serverul confirma, postarea dispare si din cache, iar raportarile ei se inchid.
+     * [authorMessage] != null -> autorul primeste un mesaj (admin care sterge postarea altcuiva).
      */
-    suspend fun deletePost(postId: String, actorId: String) {
-        moderationDao.hide(HiddenPostEntity(postId, actorId))
+    suspend fun deletePost(
+        postId: String,
+        actorId: String,
+        authorMessage: String? = null,
+        reporterReply: String = "Postarea a fost ștearsă."
+    ) {
+        val notice = authorMessage?.let { removalNotice(postId, actorId, it) }
+        // postarile din coada (inca netrimise) si cele private exista doar pe telefon
+        if (!postId.startsWith("local-") && !postId.startsWith("private-")) {
+            try {
+                val response = apiCall { postService.delete(itemId = postId) }
+                // 404 = a fost deja stearsa pe server: o scoatem si din cache
+                if (!response.isSuccessful && response.code() != 404) {
+                    throw ServerException(response.code(), "Postarea nu a putut fi ștearsă pe server.")
+                }
+            } catch (e: ServerException) {
+                if (e.status != 404) throw e
+            }
+        }
         moderationDao.answerReports(
             postId = postId,
             status = ReportStatus.RESOLVED,
-            reply = "Postarea a fost ștearsă.",
+            reply = reporterReply,
             adminId = actorId,
             resolvedAt = System.currentTimeMillis()
         )
+        notice?.let { moderationDao.insertNotice(it) }
+        moderationDao.hide(HiddenPostEntity(postId, actorId))
         itemDao.deleteById(postId)
-        if (postId.startsWith("local-") || postId.startsWith("private-")) return
-        try {
-            val response = postService.delete(authorization = getBearerToken(), itemId = postId)
-            Log.d(TAG, "server delete $postId -> ${response.code()}")
-        } catch (e: Exception) {
-            Log.w(TAG, "server delete failed, postarea ramane ascunsa local", e)
-        }
     }
 
     // ---------- Editare (Update din CRUD) ----------
 
     suspend fun findPost(id: String): Post? = itemDao.findById(id)
 
-    /** Rezultatul editarii: salvata si pe server, sau doar pe telefon (server indisponibil). */
+    /** Rezultatul editarii: salvata pe server, sau (postare inca in coada) doar in coada locala. */
     enum class UpdateResult { SAVED, SAVED_LOCALLY_ONLY }
 
     /**
-     * Editeaza o postare publica. Modificarea se scrie imediat in baza de date locala
-     * (lista se actualizeaza singura), apoi se trimite la server.
-     *  - postare creata offline (inca netrimisa): ramane de trimis, cu continutul nou
-     *  - server indisponibil: modificarea ramane pe telefon
+     * Editeaza o postare publica.
+     *  - postare din coada (creata offline, inca netrimisa): se modifica in coada, pleaca la sync;
+     *  - postare de pe server: se trimite INTAI la server; raspunsul serverului ajunge in cache,
+     *    iar lista se actualizeaza singura. Offline -> OfflineException (editarea cere conexiune).
      */
     suspend fun updatePost(post: Post): UpdateResult {
         val now = java.util.Date().toInstant().toString()
         val edited = post.copy(updated_at = now)
-        itemDao.insert(edited)
-        if (edited.isNotSaved || edited.id.startsWith("local-")) return UpdateResult.SAVED_LOCALLY_ONLY
-        return try {
-            postService.update(itemId = edited.id, item = edited, authorization = getBearerToken())
-            UpdateResult.SAVED
-        } catch (e: Exception) {
-            Log.w(TAG, "server update failed, modificarea ramane pe telefon", e)
-            UpdateResult.SAVED_LOCALLY_ONLY
+        if (edited.isNotSaved || edited.id.startsWith("local-")) {
+            itemDao.insert(edited)
+            return UpdateResult.SAVED_LOCALLY_ONLY
         }
+        val saved = apiCall { postService.update(itemId = edited.id, item = edited) }
+        handleItemUpdated(saved)
+        return UpdateResult.SAVED
     }
 
     /**
@@ -229,22 +245,25 @@ class PostRepository(
         }
     }
 
-    suspend fun refresh() {
-
+    /**
+     * Aduce postarile de pe server in cache. Intoarce null la succes, sau un mesaj pentru
+     * utilizator (ex. offline: "se afiseaza postarile salvate"); lista din cache ramane.
+     */
+    suspend fun refresh(): String? {
         Log.d(TAG, "refresh started")
-        //Log.d(TAG,getBearerToken())
-        try {
-
-            posts = postService.find(authorization = getBearerToken())
-            // inlocuim doar postarile publice deja sincronizate; cele private si cele
-            // create offline (inca netrimise) raman
-            itemDao.deleteAllPublicSynced()
-            Log.d(TAG, "refresh succeeded")
-            itemDao.insert(posts.map { it.copy(isPrivate = false, isNotSaved = false) })
-//            postsFlow.emit(Result.Success(posts))
+        return try {
+            posts = apiCall { postService.find() }
+            // intr-o singura tranzactie: lista nu "clipeste" goala; raman postarile private
+            // si cele create offline (inca netrimise)
+            itemDao.replacePublicSynced(posts.map { it.copy(isPrivate = false, isNotSaved = false).safeForCache() })
+            Log.d(TAG, "refresh succeeded: ${posts.size}")
+            null
+        } catch (e: OfflineException) {
+            Log.w(TAG, "refresh: server indisponibil", e)
+            "Ești offline. Se afișează postările salvate pe telefon."
         } catch (e: Exception) {
             Log.w(TAG, "refresh failed", e)
-            postsFlow.emit(Result.Error(e))
+            e.toUserMessage("Postările nu au putut fi actualizate.")
         }
     }
 
@@ -317,37 +336,52 @@ class PostRepository(
         awaitClose { postWsClient.closeSocket(socket) }
     }
     suspend fun update(item: Post): Post {
-        Log.d(TAG, "update $item...")
-        val updatedItem =
-            postService.update(itemId = item.id, item = item, authorization = getBearerToken())
+        Log.d(TAG, "update ${item.id}...")
+        val updatedItem = apiCall { postService.update(itemId = item.id, item = item) }
         Log.d(TAG, "update $item succeeded")
         handleItemUpdated(updatedItem)
         return updatedItem
     }
 
+    /** Trimite postarea pe server; serverul ii da id-ul si anunta prin WebSocket ceilalti clienti. */
     suspend fun save(item: Post): Post {
-        Log.d(TAG, "save $item...")
-        val createdItem = postService.create(item = item, authorization = getBearerToken())
-        Log.d(TAG, "save $item succeeded")
+        Log.d(TAG, "save...")
+        val createdItem = apiCall { postService.create(item = item) }
+        Log.d(TAG, "save succeeded ${createdItem.id}")
         handleItemCreated(createdItem)
-        val moshi = Moshi.Builder().build()
-        val jsonAdapter = moshi.adapter(PostEvent::class.java)
-        val postEvent = PostEvent(
-            event = "created",
-            payload = Payload(createdItem)
-        )
-        val eventJson = jsonAdapter.toJson(postEvent)
-
-        // Anuntam si prin WebSocket (daca e conectat). Daca nu e, postarea e deja in
-        // baza locala, deci apare oricum in lista.
-        try {
-            val sent = postWsClient.send(eventJson)
-            Log.d(TAG, "WebSocket event created sent=$sent")
-        } catch (e: Exception) {
-            Log.w(TAG, "Failed to send WebSocket event", e)
-        }
         return createdItem
     }
+
+    /** Rezultatul crearii: trimisa pe server, sau pusa in coada (server indisponibil). */
+    enum class CreateResult { SENT, QUEUED }
+
+    /**
+     * Postare noua: pe server daca raspunde; altfel in coada locala (apare imediat in lista,
+     * marcata "in asteptare", si se trimite automat cand revine conexiunea).
+     * Daca serverul RESPINGE postarea (ex. 403, date invalide), eroarea ajunge la utilizator.
+     */
+    suspend fun createPost(post: Post): CreateResult = try {
+        save(post.copy(id = "", isNotSaved = false))
+        CreateResult.SENT
+    } catch (e: OfflineException) {
+        Log.d(TAG, "server indisponibil: postarea intra in coada")
+        saveToLocal(post)
+        CreateResult.QUEUED
+    }
+
+    /**
+     * Plasa de siguranta: SQLite pe Android nu poate citi un rand mai mare de ~2 MB, deci o
+     * postare cu o poza uriasa (ex. creata de o versiune veche a aplicatiei) ar opri aplicatia
+     * la afisarea listei. O pastram in cache fara poza, in loc sa blocam aplicatia.
+     */
+    private fun Post.safeForCache(): Post =
+        if (photo.length > MAX_CACHED_PHOTO_CHARS) {
+            Log.w(TAG, "postarea $id are o poza prea mare (${photo.length / 1024} KB), se salveaza fara poza")
+            copy(photo = "")
+        } else this
+
+    /** Cate postari asteapta sa fie trimise (afisat in bannerul offline). */
+    fun pendingCount(): Flow<Int> = itemDao.observeUnsyncedCount()
 
     private suspend fun handleItemDeleted(item: Post) {
         Log.d(TAG, "handleItemDeleted ${item.id}")
@@ -357,7 +391,7 @@ class PostRepository(
     private suspend fun handleItemUpdated(post: Post) {
         Log.d(TAG, "handleItemUpdated ${post.id}")
         // scriem in baza locala -> lista (Flow din Room) se actualizeaza singura
-        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false))
+        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false).safeForCache())
     }
 
     /** Dupa ce o postare creata offline a ajuns pe server, stergem copia locala temporara. */
@@ -373,11 +407,20 @@ class PostRepository(
      * iar copia locala temporara ("local-...") se sterge, ca sa nu apara de doua ori.
      */
     suspend fun syncUnsynced() = syncMutex.withLock {
-        val unsynced = itemDao.getUnsyncedItems()
+        val token = Api.tokenInterceptor.token
+        // fara sesiune de pe server (ex. login offline), serverul nu ar accepta postarile
+        if (token.isNullOrEmpty() || TokenInterceptor.isLocalToken(token)) return@withLock
+        // doar postarile contului conectat acum (nu ale altui cont de pe acelasi telefon)
+        val ownerKey = currentOwnerKey()
+        val unsynced = itemDao.getUnsyncedItems().filter { it.user_id == ownerKey }
         Log.d(TAG, "syncUnsynced: ${unsynced.size}")
         for (local in unsynced) {
             try {
                 save(local.copy(id = "", isNotSaved = false))
+                itemDao.deleteById(local.id)
+            } catch (e: ServerException) {
+                // serverul a refuzat-o definitiv (ex. date invalide): nu o retrimitem la nesfarsit
+                Log.w(TAG, "postarea din coada a fost refuzata de server: ${e.message}")
                 itemDao.deleteById(local.id)
             } catch (e: Exception) {
                 Log.w(TAG, "syncUnsynced failed, reincercam mai tarziu", e)
@@ -400,7 +443,7 @@ class PostRepository(
 //        //Log.d(posts.toString(),"posts")
 //        postsFlow.emit(Result.Success(posts))
         // ce vine de pe server / WebSocket e mereu public
-        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false))
+        itemDao.insert(post.copy(isPrivate = false, isNotSaved = false).safeForCache())
     }
 
     /** Postare publica salvata offline: apare imediat in lista, se trimite cand revine reteaua. */
@@ -410,7 +453,7 @@ class PostRepository(
                 id = post.id.ifEmpty { "local-" + java.util.UUID.randomUUID().toString() },
                 isNotSaved = true,
                 isPrivate = false
-            )
+            ).safeForCache()
         )
     }
 

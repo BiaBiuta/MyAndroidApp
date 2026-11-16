@@ -1,39 +1,31 @@
 package com.example.myandroidapp.todo.data.remote
 
 import com.example.myandroidapp.todo.data.Post
-import okhttp3.ResponseBody
 import retrofit2.http.Body
 import retrofit2.http.DELETE
 import retrofit2.http.GET
-import retrofit2.http.Header
-import retrofit2.http.Headers
 import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 
+/**
+ * CRUD pe postari, pe server. Token-ul JWT nu mai e un parametru: il ataseaza
+ * automat TokenInterceptor (Api.okHttpClient) la fiecare cerere.
+ */
 interface PostService {
     @GET("/posts")
-    suspend fun find(@Header("Authorization") authorization: String): List<Post>
+    suspend fun find(): List<Post>
+
     @GET("/post/{id}")
-    suspend fun read(
-        @Header("Authorization") authorization: String,
-        @Path("id") itemId: String?
-    ): Post;
-    // Folosit la stergere (autor / admin). Daca serverul nu are ruta sau nu raspunde,
-    // postarea ramane ascunsa local (hidden_posts).
-    @DELETE("/post/{id}")
-    suspend fun delete(
-        @Header("Authorization") authorization: String,
-        @Path("id") itemId: String
-    ): retrofit2.Response<Unit>
-    @Headers("Content-Type: application/json")
+    suspend fun read(@Path("id") itemId: String): Post
+
     @POST("/post")
-    suspend fun create(@Header("Authorization") authorization: String, @Body item: Post): Post
-    @Headers("Content-Type: application/json")
+    suspend fun create(@Body item: Post): Post
+
     @PUT("/post/{id}")
-    suspend fun update(
-        @Header("Authorization") authorization: String,
-        @Path("id") itemId: String?,
-        @Body item: Post
-    ): Post
+    suspend fun update(@Path("id") itemId: String, @Body item: Post): Post
+
+    // 204 fara continut
+    @DELETE("/post/{id}")
+    suspend fun delete(@Path("id") itemId: String): retrofit2.Response<Unit>
 }

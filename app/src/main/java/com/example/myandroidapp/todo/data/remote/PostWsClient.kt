@@ -187,10 +187,12 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
 
     /** Pastreaza token-ul si il trimite imediat daca socket-ul e deja deschis. */
     fun authorize(token: String) {
-        this.token = token.ifEmpty { null }
+        // sesiunile offline ("local-...") nu au token de server: nu le trimitem
+        this.token = token.takeUnless { it.isEmpty() || it.startsWith("local-") }
         val socket = webSocket
-        if (isConnected && socket != null && this.token != null) {
-            sendAuthorization(socket, token)
+        val accepted = this.token
+        if (isConnected && socket != null && accepted != null) {
+            sendAuthorization(socket, accepted)
         } else {
             Log.d(TAG, "Token pastrat; va fi trimis la deschiderea socket-ului")
         }
