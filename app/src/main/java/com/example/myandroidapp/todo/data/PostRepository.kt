@@ -611,4 +611,4 @@ class PostRepository(
 //    }
 }
 /** Versiunea minima a serverului din repo (server/, GET /health) cu care merge aplicatia. */
-private const val REQUIRED_SERVER_VERSION = 3
+private const val REQUIRED_SERVER_VERSION = 4

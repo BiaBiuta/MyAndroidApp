@@ -61,13 +61,21 @@ private const val CHANNEL_ID = "MyTestChannel"
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PostAddScreen(onClose: () -> Unit, isPrivateInitially: Boolean = false) {
+fun PostAddScreen(
+    onClose: () -> Unit,
+    isPrivateInitially: Boolean = false,
+    // postare dintr-un loc inregistrat de tracker (Trackerele mele -> Postează)
+    prefillPlace: String? = null,
+    prefillLocation: com.example.myandroidapp.todo.data.Location? = null,
+    prefillVisitDate: Long = 0
+) {
     val viewModel = viewModel<PostViewModel>(factory = PostViewModel.Factory)
     val state = viewModel.state
     val context = LocalContext.current
 
     LaunchedEffect(Unit) {
         if (isPrivateInitially) viewModel.onPrivateChange(true)
+        if (prefillPlace != null && prefillLocation != null) viewModel.prefill(prefillPlace, prefillLocation, prefillVisitDate)
         createNotificationChannel(CHANNEL_ID, context)
     }
     // dupa salvare: mesajul (publicata / in coada / privata), apoi inapoi la lista

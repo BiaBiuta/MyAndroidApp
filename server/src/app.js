@@ -7,6 +7,7 @@ const { Store } = require('./store');
 const { WsHub } = require('./websocket');
 const { ApiError, Router, readJsonBody, sendJson, bearerToken } = require('./http');
 const security = require('./security');
+const { registerDeviceRoutes } = require('./devices');
 
 const ROLES = ['USER', 'ADMIN'];
 const PROVIDERS = { EMAIL: 'EMAIL', GOOGLE: 'GOOGLE', APPLE: 'APPLE', ANONYMOUS: 'ANONYMOUS' };
@@ -71,7 +72,7 @@ function createApp(options = {}) {
     if (user.role !== 'ADMIN') throw new ApiError(403, 'Doar administratorii pot face această operație.');
   }
 
-  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 3, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats'], time: new Date().toISOString() } }));
+  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 4, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats', 'devices'], time: new Date().toISOString() } }));
 
   router.add('POST', '/signup', ({ body }) => {
     const email = security.normalizeEmail(body.email);
@@ -476,6 +477,9 @@ function createApp(options = {}) {
     },
     { auth: true },
   );
+
+  // Trackerele WanderLog (IoT): inregistrare cu cheie per dispozitiv, revocare, actualizari semnate
+  registerDeviceRoutes(router, store, settings);
 
   // ---------------------------------------------------------------------------
   // Serverul HTTP

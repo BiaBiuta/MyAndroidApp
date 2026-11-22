@@ -12,6 +12,7 @@ import com.example.myandroidapp.todo.ui.myposts.MyPostsScreen
 import com.example.myandroidapp.todo.ui.myreports.MyReportsScreen
 import com.example.myandroidapp.todo.ui.edit.EditPostScreen
 import com.example.myandroidapp.todo.ui.detail.PostDetailScreen
+import com.example.myandroidapp.iot.ui.DevicesScreen
 import androidx.annotation.RequiresApi
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -49,6 +50,8 @@ val adminRoute = "admin"
 val myReportsRoute = "my-reports"
 val editPostRoute = "posts/edit"
 val postDetailRoute = "posts/detail"
+val devicesRoute = "devices"
+val postFromVisitRoute = "posts-new-visit"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -111,6 +114,7 @@ fun MyAppNavHost() {
                 onOpenMyPosts = { navController.navigate(myPostsRoute) },
                 onOpenAdmin = { navController.navigate(adminRoute) },
                 onOpenMyReports = { navController.navigate(myReportsRoute) },
+                onOpenDevices = { navController.navigate(devicesRoute) },
                 onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
                 // vizitatorul anonim nu are ce debloca cu amprenta
                 showBiometricToggle = sessionState is SessionState.Active && currentUser?.isGuest != true,
@@ -158,6 +162,40 @@ fun MyAppNavHost() {
                     navController.popBackStack()
                 }
             )
+        }
+        // Doar USER: trackerele IoT (asociere cu cod, revocare, actualizari semnate)
+        composable(route = devicesRoute) {
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                DevicesScreen(
+                    onBack = { navController.popBackStack() },
+                    onCreatePost = { place, lat, lng, at ->
+                        navController.navigate("$postFromVisitRoute?place=${Uri.encode(place)}&lat=$lat&lng=$lng&date=$at")
+                    }
+                )
+            }
+        }
+        // Postare noua dintr-un loc trimis de tracker (locul, coordonatele si data, completate)
+        composable(
+            route = "$postFromVisitRoute?place={place}&lat={lat}&lng={lng}&date={date}",
+            arguments = listOf(
+                navArgument("place") { type = NavType.StringType; defaultValue = "" },
+                navArgument("lat") { type = NavType.StringType; defaultValue = "0" },
+                navArgument("lng") { type = NavType.StringType; defaultValue = "0" },
+                navArgument("date") { type = NavType.StringType; defaultValue = "0" }
+            )
+        ) { entry ->
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                val args = entry.arguments
+                PostAddScreen(
+                    onClose = { navController.popBackStack() },
+                    prefillPlace = args?.getString("place").orEmpty(),
+                    prefillLocation = com.example.myandroidapp.todo.data.Location(
+                        args?.getString("lat")?.toDoubleOrNull() ?: 0.0,
+                        args?.getString("lng")?.toDoubleOrNull() ?: 0.0
+                    ),
+                    prefillVisitDate = args?.getString("date")?.toLongOrNull() ?: 0L
+                )
+            }
         }
         // Doar rolul ADMIN (actiunile sunt verificate si in RoleRepository)
         composable(route = adminRoute) {

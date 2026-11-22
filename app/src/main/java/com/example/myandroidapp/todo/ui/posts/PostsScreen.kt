@@ -80,6 +80,8 @@ fun PostsScreen(
     onOpenAdmin: () -> Unit = {},
     // doar USER: raportarile trimise, cu statusul si raspunsul adminului
     onOpenMyReports: () -> Unit = {},
+    // doar USER: trackerele IoT asociate
+    onOpenDevices: () -> Unit = {},
     // doar autorul: editarea postarii proprii
     onEditPost: (id: String) -> Unit = {},
     // comutatorul de amprenta: vizibil doar pentru sesiunile salvate (login cu e-mail si parola)
@@ -208,6 +210,7 @@ fun PostsScreen(
             RoleBar(
                 user = currentUser,
                 onOpenMyPosts = onOpenMyPosts,
+                onOpenDevices = onOpenDevices,
                 onOpenMyReports = onOpenMyReports,
                 onOpenAdmin = onOpenAdmin
             )
@@ -551,7 +554,8 @@ fun RoleBar(
     user: UserEntity?,
     onOpenMyPosts: () -> Unit,
     onOpenAdmin: () -> Unit,
-    onOpenMyReports: () -> Unit = {}
+    onOpenMyReports: () -> Unit = {},
+    onOpenDevices: () -> Unit = {}
 ) {
     // Culori din tema (Material 3): contrast corect atat in tema luminoasa, cat si in cea intunecata
     androidx.compose.material3.Surface(
@@ -599,6 +603,7 @@ fun RoleBar(
                 ) {
                     TextButton(onClick = onOpenMyPosts) { Text("Postările mele") }
                     TextButton(onClick = onOpenMyReports) { Text("Raportările mele") }
+                    TextButton(onClick = onOpenDevices) { Text("Trackere") }
                 }
             }
         }

@@ -61,6 +61,8 @@ function readJsonBody(req, maxBytes) {
       chunks.push(chunk);
     });
     req.on('end', () => {
+      // corpul exact, ca text: cererile semnate de tracker se verifica peste aceiasi octeti
+      req.rawBody = Buffer.concat(chunks);
       if (size === 0) return resolve({});
       try {
         resolve(JSON.parse(Buffer.concat(chunks).toString('utf8')));

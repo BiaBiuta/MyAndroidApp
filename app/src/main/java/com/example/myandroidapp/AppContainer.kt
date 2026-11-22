@@ -15,6 +15,7 @@ import com.example.myandroidapp.todo.data.remote.PostService
 import com.example.myandroidapp.todo.data.remote.PostWsClient
 import com.example.myapp.MyAppDatabase
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 
 //import com.example.myapplication.MyAppDatabase
 //import com.example.myapplication.auth.data.AuthRepository
@@ -52,6 +53,17 @@ class AppContainer(val context: Context) {
             database.moderationDao(),
             currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
             scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
+        )
+    }
+
+    // Trackerele WanderLog (IoT): asociere cu cod, chei per dispozitiv, actualizari semnate
+    val deviceRepository: com.example.myandroidapp.iot.data.DeviceRepository by lazy {
+        com.example.myandroidapp.iot.data.DeviceRepository(
+            service = Api.retrofit.create(com.example.myandroidapp.iot.data.remote.DeviceService::class.java),
+            dao = database.pairedDeviceDao(),
+            tracker = com.example.myandroidapp.iot.data.TrackerClient(),
+            ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
+            currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey }
         )
     }
 

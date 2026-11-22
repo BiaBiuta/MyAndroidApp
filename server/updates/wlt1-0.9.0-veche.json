@@ -1,0 +1,5 @@
+{
+  "keyId": "wl-vendor-1",
+  "payload": "{\"model\":\"WLT-1\",\"version\":\"0.9.0\",\"releasedAt\":\"2026-11-22\",\"notes\":\"Versiune veche (test: revenire la o versiune anterioară)\",\"config\":{\"reportIntervalSeconds\":60,\"gpsMode\":\"BALANCED\"}}",
+  "signature": "MEUCIGKF57RLhLKxiYXgre8P348Fgm7SgHQqCa0OxsG0KpwqAiEAnWwx9OG0X0IFdlnPIs61lhdJ1INjfj1D81Kx+vakEl0="
+}

@@ -59,3 +59,51 @@ WebSocket-ul trimite fiecărui client doar ce are voie să vadă (ciorna altcuiv
 - Permisiunile se verifică **pe server**, din token, nu din ce trimite aplicația.
 - Google / Apple sunt simulate. Ca să nu poată fi preluat un cont existent, o adresă care are deja cont cu parolă (sau cu alt furnizor) e refuzată, iar conturile create așa nu primesc niciodată rolul ADMIN.
 - Rolul ADMIN îl primește la înregistrare adresa `admin@wanderlog.ro` (variabila de mediu `ADMIN_EMAILS`).
+
+## Trackerul WanderLog (IoT)
+
+Un tracker GPS de călătorie **simulat** (`device/tracker.js`) care se asociază cu aplicația și trimite la server locurile prin care trece.
+
+### Pornire (3 terminale)
+
+```
+npm start                     # serverul (portul 3000)
+node device/tracker.js        # trackerul (portul 4000; din emulator: 10.0.2.2:4000)
+```
+
+În consola trackerului: `p` = modul de asociere (2 minute), `s` = stare, `r` = resetare (cheie nouă), `q` = ieșire.
+În aplicație: **Trackere → Asociază un tracker**, adresa `10.0.2.2:4000`, apoi codul de 6 cifre afișat de tracker.
+
+### Securitate
+
+| Cerință | Implementare |
+|---|---|
+| Asociere securizată cu cod out-of-band | Asocierea merge doar în modul de asociere (ca butonul fizic al unui dispozitiv). Schimb de chei ECDH P-256 + **angajament** (commitment) la nonce-ul trackerului; codul de 6 cifre e derivat din transcriptul întregului schimb și **afișat doar pe tracker**. Utilizatorul îl tastează în aplicație: dacă cineva s-a interpus (MITM), codurile diferă. Cheia de asociere K = HKDF-SHA256(secret ECDH, transcript); ambele părți dovedesc că o au (HMAC de confirmare). Max. 3 încercări, sesiune de 2 minute, un singur proprietar. |
+| Chei per dispozitiv + revocare | Fiecare tracker are cheia lui ECDSA P-256 (id = amprenta cheii). Aplicația o primește autentificat cu K și o înregistrează pe server (`POST /devices`). Trackerul **semnează** fiecare cerere (`X-WL-Device`, `X-WL-Time`, `X-WL-Nonce`, `X-WL-Signature` peste metodă, cale, oră, nonce și hash-ul corpului); serverul respinge semnături greșite, cereri vechi și reluări. `POST /devices/:id/revoke` (din aplicație) = trackerul pierdut primește 403 la orice cerere și se oprește; cheia lui nu mai poate fi înregistrată. |
+| Verificarea actualizărilor | Actualizările (`updates/*.json`) sunt semnate ECDSA de **producător** cu `tools/vendor-private.pem` (secretă, în `.gitignore`). Aplicația are doar cheia publică și **refuză să trimită** o actualizare cu semnătură invalidă, pentru alt model sau mai veche (rollback). Trackerul verifică și el (apărare în adâncime). Serverul doar distribuie fișierele și nu poate crea o actualizare acceptată. |
+
+Comenzile aplicației către tracker (stare, actualizare, dezasociere) sunt autentificate cu HMAC-ul cheii K (+ oră și nonce).
+
+### Endpoint-uri
+
+| Metodă | Cale | Autentificare | Descriere |
+|---|---|---|---|
+| POST | `/devices` | JWT (USER) | Înregistrează trackerul asociat: `{id, name, model, firmware, publicKey}` |
+| GET | `/devices` | JWT | Trackerele contului |
+| POST | `/devices/:id/revoke` | JWT (proprietar) | Revocare definitivă |
+| POST | `/devices/:id/firmware` | JWT (proprietar) | Versiunea instalată |
+| GET | `/devices/:id/visits` | JWT (proprietar) | Locurile trimise de tracker |
+| GET | `/device-updates` | JWT | Actualizările publicate (aplicația le verifică) |
+| POST | `/device/visits` | semnătura trackerului | Un loc vizitat |
+| GET | `/device/status` | semnătura trackerului | Starea (403 dacă e revocat) |
+
+### Actualizări de test
+
+| Fișier | Rezultat așteptat |
+|---|---|
+| `wlt1-1.1.0.json` | semnătură validă → se instalează |
+| `wlt1-1.2.0-modificat.json` | conținut modificat după semnare → **refuzată** |
+| `wlt1-0.9.0-veche.json` | semnătură validă, dar versiune mai veche → **refuzată** (rollback) |
+
+Actualizări noi: `node tools/sign-update.js sign --version 1.3.0 --interval 30 --notes "..."`; o copie falsificată: `node tools/sign-update.js tamper updates/wlt1-1.3.0.json`.
+

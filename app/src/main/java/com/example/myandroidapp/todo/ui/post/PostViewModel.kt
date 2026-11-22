@@ -78,6 +78,20 @@ class PostViewModel(
         state = state.copy(place = place, location = location, error = null)
     }
 
+    private var prefilled = false
+
+    /** Postare noua dintr-un loc trimis de tracker: locul, coordonatele si data vizitei (o singura data). */
+    fun prefill(place: String, location: Location, visitDate: Long) {
+        if (prefilled) return
+        prefilled = true
+        state = state.copy(
+            title = state.title.ifBlank { place.substringBefore(",").take(MAX_TITLE) },
+            place = place,
+            location = location,
+            visitDate = if (visitDate > 0) visitDate else state.visitDate
+        )
+    }
+
     fun onDraftChange(value: Boolean) {
         state = state.copy(isDraft = value)
     }
