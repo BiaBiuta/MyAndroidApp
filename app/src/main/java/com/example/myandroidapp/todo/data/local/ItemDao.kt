@@ -20,9 +20,11 @@ abstract class ItemDao {
     )
     abstract fun getAll(): Flow<List<Post>>
 
-    // ===== NOU =====
-    // Lista principala pentru contul conectat (ownerKey): postarile NESINCRONIZATE
-    // (create / editate offline) le vede DOAR autorul lor; ceilalti le vad dupa sincronizare.
+    /**
+     * Lista principala pentru contul ownerKey: ca getAll(), dar postarile NESINCRONIZATE (create /
+     * editate offline, in coada sau esuate) le vede DOAR autorul lor. Pe un telefon folosit de mai
+     * multe conturi, contul B nu vede ce a postat A offline pana cand A nu o trimite pe server.
+     */
     @Query(
         "SELECT * FROM Posts WHERE isPrivate = 0 AND isDeleted = 0 " +
                 "AND id NOT IN (SELECT postId FROM hidden_posts) " +
@@ -76,8 +78,7 @@ abstract class ItemDao {
     @Query("SELECT COUNT(*) FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0 AND syncStatus = 'PENDING'")
     abstract fun observeUnsyncedCount(): Flow<Int>
 
-    // ===== NOU =====
-    // Acelasi numar, dar doar pentru contul conectat (nu numara postarile altui cont)
+    // Coada contului conectat (bannerul "N postari asteapta" nu numara postarile altui cont)
     @Query("SELECT COUNT(*) FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0 AND syncStatus = 'PENDING' AND user_id = :ownerKey")
     abstract fun observeUnsyncedCountFor(ownerKey: String): Flow<Int>
 

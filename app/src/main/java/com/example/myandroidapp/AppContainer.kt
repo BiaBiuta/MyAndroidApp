@@ -9,6 +9,7 @@ import com.example.myandroidapp.auth.data.remote.AuthDataSource
 import com.example.myandroidapp.auth.data.remote.UserService
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.core.TAG
+import com.example.myandroidapp.core.data.UserPreferences
 import com.example.myandroidapp.core.data.UserPreferencesRepository
 import com.example.myandroidapp.todo.data.PostRepository
 import com.example.myandroidapp.todo.data.remote.PostService
@@ -36,7 +37,11 @@ class AppContainer(val context: Context) {
     }
     //it implement in a dynamic mode methods from interface
     private val postService: PostService = Api.retrofit.create(PostService::class.java)
-    private val postWsClient: PostWsClient = PostWsClient(Api.okHttpClient)
+    // ping la 15 s: o conexiune "moarta" (server oprit, cablu / Wi-Fi intrerupt) e detectata
+    // repede si socket-ul se reconecteaza, in loc sa para deschis la nesfarsit
+    private val postWsClient: PostWsClient = PostWsClient(
+        Api.okHttpClient.newBuilder().pingInterval(15, java.util.concurrent.TimeUnit.SECONDS).build()
+    )
     private val authDataSource: AuthDataSource = AuthDataSource()
     private val database: MyAppDatabase by lazy { MyAppDatabase.getDatabase(context) }
     //private val database: MyAppDatabase by lazy { MyAppDatabase.getDatabase(context) }
@@ -53,6 +58,7 @@ class AppContainer(val context: Context) {
             database.moderationDao(),
             currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
             ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
+            ensureServerSession = { upgradeOfflineSession() },
             scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
         )
     }
@@ -66,6 +72,30 @@ class AppContainer(val context: Context) {
             ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
             currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey }
         )
+    }
+
+    /**
+     * Login-ul a fost facut offline, iar serverul raspunde din nou: sesiunea trece pe server in
+     * fundal (token JWT real), pastrand alegerea pentru amprenta. Apelat inainte de sincronizare.
+     */
+    private suspend fun upgradeOfflineSession(): Boolean {
+        val upgraded = authRepository.upgradeOfflineSession() ?: return false
+        val current = userPreferencesRepository.userPreferencesStream.first()
+        // alt cont conectat intre timp: nu amestecam sesiunile
+        if (current.email.isNotEmpty() && !current.email.equals(upgraded.email, ignoreCase = true)) return false
+        userPreferencesRepository.save(
+            UserPreferences(
+                email = upgraded.email,
+                token = upgraded.token,
+                user = upgraded.user,
+                biometricEnabled = current.biometricEnabled,
+                passwordHash = upgraded.passwordHash.ifEmpty { current.passwordHash },
+                provider = upgraded.provider
+            )
+        )
+        Api.tokenInterceptor.token = upgraded.token
+        postRepository.setToken(upgraded.token)
+        return true
     }
 
     val authRepository: AuthRepository by lazy {

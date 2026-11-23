@@ -220,7 +220,9 @@ fun PostsScreen(
                 isOnline = myNetworkStatusViewModel.uiState,
                 pendingCount = pendingCount,
                 offlineSession = offlineSession,
-                onReconnect = onLogout
+                onReconnect = onLogout,
+                syncing = itemsViewModel.syncing,
+                onSyncNow = itemsViewModel::syncNow
             )
             // Cand revine reteaua, lista se reincarca singura de pe server
             var wasOffline by remember { mutableStateOf(false) }
@@ -504,7 +506,9 @@ private fun ConnectivityBanner(
     isOnline: Boolean,
     pendingCount: Int,
     offlineSession: Boolean,
-    onReconnect: () -> Unit
+    onReconnect: () -> Unit,
+    syncing: Boolean = false,
+    onSyncNow: () -> Unit = {}
 ) {
     val pending = when (pendingCount) {
         0 -> ""
@@ -539,6 +543,8 @@ private fun ConnectivityBanner(
             )
             if (isOnline && offlineSession) {
                 TextButton(onClick = onReconnect) { Text("Reconectare") }
+            } else if (isOnline && pendingCount > 0) {
+                TextButton(onClick = onSyncNow, enabled = !syncing) { Text(if (syncing) "Se trimite…" else "Trimite acum") }
             }
         }
     }

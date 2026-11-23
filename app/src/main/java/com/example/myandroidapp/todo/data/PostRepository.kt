@@ -1,5 +1,8 @@
 package com.example.myandroidapp.todo.data
 
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.distinctUntilChanged
 import android.util.Log
 import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
@@ -38,9 +41,6 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import com.example.myandroidapp.todo.data.remote.ServerStats
-import kotlinx.coroutines.flow.distinctUntilChanged
-import kotlinx.coroutines.flow.flatMapLatest
-import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import kotlin.collections.List
 
@@ -68,7 +68,10 @@ class PostRepository(
     private val moderationDao: ModerationDao,
     // cheia contului conectat acum (id-ul de pe server): doar postarile lui din coada se trimit
     private val currentOwnerKey: suspend () -> String,
+    // contul conectat, ca flux: lista si coada se schimba imediat la schimbarea contului
     private val ownerKeys: Flow<String> = flowOf(""),
+    // sesiune facuta offline (token "local-"): incearca login-ul pe server cand acesta revine
+    private val ensureServerSession: suspend () -> Boolean = { false },
     // programeaza sincronizarea cand revine reteaua (WorkManager), pentru ce a ramas in coada
     private val scheduleSync: () -> Unit = {}
 ) {
@@ -87,10 +90,11 @@ class PostRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-//    // Doar postarile publice (lista principala)
-//    val itemStream by lazy { itemDao.getAll() }
-@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.getVisibleTo(it) } }
+    // Doar postarile publice (lista principala)
+    // postarile nesincronizate ale altui cont de pe acelasi telefon nu apar (vezi ItemDao.getVisibleTo)
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.getVisibleTo(it) } }
+
     // "Postarile mele": postarile publice ale unui utilizator
     fun publicItemsOf(ownerKey: String): Flow<List<Post>> = itemDao.getPublicByOwner(ownerKey)
 
@@ -451,6 +455,21 @@ val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flat
         val generation = ++wsGeneration
         Log.d(TAG, "openWsClient #$generation")
         withContext(Dispatchers.IO) {
+            // Cat timp aplicatia e deschisa: daca exista postari in coada, reincercam trimiterea la
+            // fiecare 10 s. Nu depinde de WebSocket sau de WorkManager (care asteapta tot mai mult
+            // intre incercari): cand serverul revine, postarile pleaca in cateva secunde.
+            launch {
+                while (isActive && generation == wsGeneration) {
+                    delay(FOREGROUND_RETRY_MS)
+                    if (generation != wsGeneration) break
+                    val owner = currentOwnerKey()
+                    val waiting = itemDao.getUnsyncedItems().any { it.user_id == owner }
+                    if (waiting) {
+                        Log.d(TAG, "retry: postari in coada, incercam trimiterea")
+                        if (syncUnsynced()) refresh()
+                    }
+                }
+            }
             var backoffMs = 2_000L
             while (isActive && generation == wsGeneration) {
                 var opened = false
@@ -531,10 +550,10 @@ val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flat
         } else this
 
     /** Cate postari asteapta sa fie trimise (afisat in bannerul offline). */
-//    fun pendingCount(): Flow<Int> = itemDao.observeUnsyncedCount()
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun pendingCount(): Flow<Int> =
         ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.observeUnsyncedCountFor(it) }
+
     private suspend fun handleItemDeleted(item: Post) {
         Log.d(TAG, "handleItemDeleted ${item.id}")
         // o editare offline a acestei postari va primi 410 la sincronizare (-> ciorna privata)
@@ -560,7 +579,16 @@ val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flat
      * modificarilor. Intoarce true daca n-a mai ramas nimic de trimis din cauza retelei
      * (SyncWorker reincearca mai tarziu altfel).
      */
+    /** "Trimite acum" din banner: incercare imediata; intoarce true daca nu mai e nimic in coada. */
+    suspend fun syncNow(): Boolean {
+        val done = syncUnsynced()
+        if (!done) scheduleSync()
+        return done
+    }
+
     suspend fun syncUnsynced(): Boolean = syncMutex.withLock {
+        // login facut offline: trecem intai sesiunea pe server (altfel serverul n-ar accepta nimic)
+        if (!hasServerSession() && !ensureServerSession()) return@withLock false
         if (!hasServerSession()) return@withLock false
         // doar postarile contului conectat acum (nu ale altui cont de pe acelasi telefon)
         val ownerKey = currentOwnerKey()
@@ -619,3 +647,6 @@ val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flat
 }
 /** Versiunea minima a serverului din repo (server/, GET /health) cu care merge aplicatia. */
 private const val REQUIRED_SERVER_VERSION = 4
+
+/** Cat de des reincearca aplicatia deschisa sa trimita postarile din coada. */
+private const val FOREGROUND_RETRY_MS = 10_000L

@@ -43,6 +43,60 @@ class AuthRepository(
 
     enum class Reason { INVALID_CREDENTIALS, LOCKED, BLOCKED, OFFLINE, REJECTED }
 
+    /**
+     * Login facut offline (server indisponibil): cum ne reautentificam pe server cand revine,
+     * ca postarile din coada sa plece fara un nou login. Tinut DOAR in memorie (niciodata pe disc)
+     * si sters la primul login online, la logout sau daca serverul refuza datele.
+     */
+    private sealed interface DeferredLogin {
+        class Password(val email: String, val password: CharArray) : DeferredLogin
+        class Provider(val provider: String, val email: String) : DeferredLogin
+        class Guest(val guestId: String) : DeferredLogin
+    }
+
+    @Volatile
+    private var deferredLogin: DeferredLogin? = null
+
+    private fun forgetDeferredLogin() {
+        (deferredLogin as? DeferredLogin.Password)?.password?.fill('\u0000')
+        deferredLogin = null
+    }
+
+    /**
+     * Sesiune offline + server disponibil din nou: login pe server in fundal, cu datele tinute
+     * in memorie. Intoarce sesiunea noua (token JWT real) sau null (nu e cazul / nu se poate inca).
+     */
+    suspend fun upgradeOfflineSession(): UserPreferences? {
+        val token = Api.tokenInterceptor.token
+        if (token.isNullOrEmpty() || !token.startsWith("local-")) return null
+        val pending = deferredLogin ?: return null
+        val result = try {
+            when (pending) {
+                is DeferredLogin.Password -> {
+                    val password = String(pending.password)
+                    val hash = withContext(Dispatchers.Default) { PasswordHasher.hash(password) }
+                    onlineSuccess(authDataSource.login(pending.email, password), AuthProvider.EMAIL, hash)
+                }
+                is DeferredLogin.Provider ->
+                    onlineSuccess(authDataSource.signInWithProvider(pending.provider, pending.email), pending.provider, "")
+                is DeferredLogin.Guest ->
+                    onlineSuccess(authDataSource.signInAnonymously(pending.guestId), AuthProvider.ANONYMOUS, "")
+            }
+        } catch (e: OfflineException) {
+            return null // serverul tot nu raspunde: incercam la urmatoarea sincronizare
+        } catch (e: ServerException) {
+            // ex. parola schimbata sau cont blocat intre timp: e nevoie de un login nou, manual
+            Log.w(TAG, "reautentificarea pe server a esuat: ${e.status}")
+            forgetDeferredLogin()
+            return null
+        }
+        forgetDeferredLogin()
+        return (result as? AuthResult.Success)?.session
+    }
+
+    /** true = sesiunea offline poate trece singura pe server (datele sunt in memorie). */
+    fun canUpgradeOfflineSession(): Boolean = deferredLogin != null
+
     // ---------- E-mail si parola ----------
 
     suspend fun login(email: String, password: String): AuthResult {
@@ -79,6 +133,8 @@ class AuthRepository(
                 val account = roleRepository.findAccount(email)
                 // inlocuim hash-ul vechi cu unul nou (algoritmul si iteratiile curente)
                 if (account != null) roleRepository.saveCredentials(email, account.ownerKey, passwordHash)
+                forgetDeferredLogin()
+                deferredLogin = DeferredLogin.Password(email, password.toCharArray())
                 AuthResult.Success(
                     UserPreferences(
                         email = account?.email ?: email,
@@ -118,7 +174,11 @@ class AuthRepository(
                 Reason.OFFLINE
             )
             account.isBlocked -> AuthResult.Failure(RoleRepository.BLOCKED_MESSAGE, Reason.BLOCKED)
-            else -> AuthResult.Success(localSession(account.email, account.ownerKey, provider), offline = true)
+            else -> {
+                forgetDeferredLogin()
+                deferredLogin = DeferredLogin.Provider(provider, email)
+                AuthResult.Success(localSession(account.email, account.ownerKey, provider), offline = true)
+            }
         }
     }
 
@@ -129,10 +189,14 @@ class AuthRepository(
     } catch (e: OfflineException) {
         // offline, vizitatorul poate vedea postarile salvate pe telefon
         when (val local = roleRepository.signInWithProvider(guestEmail(guestId), AuthProvider.ANONYMOUS)) {
-            is RoleRepository.ProviderSignIn.Success -> AuthResult.Success(
-                localSession(local.user.email, local.user.ownerKey, AuthProvider.ANONYMOUS),
-                offline = true
-            )
+            is RoleRepository.ProviderSignIn.Success -> {
+                forgetDeferredLogin()
+                deferredLogin = DeferredLogin.Guest(guestId)
+                AuthResult.Success(
+                    localSession(local.user.email, local.user.ownerKey, AuthProvider.ANONYMOUS),
+                    offline = true
+                )
+            }
             RoleRepository.ProviderSignIn.Blocked ->
                 AuthResult.Failure(RoleRepository.BLOCKED_MESSAGE, Reason.BLOCKED)
         }
@@ -145,6 +209,7 @@ class AuthRepository(
      * Sesiunea salvata pe telefon o sterge MyAppViewModel.
      */
     suspend fun logout() {
+        forgetDeferredLogin()
         val token = Api.tokenInterceptor.token
         if (!token.isNullOrEmpty() && !token.startsWith("local-")) {
             withTimeoutOrNull(3_000) {
@@ -162,6 +227,8 @@ class AuthRepository(
 
     /** Login reusit pe server: contul ajunge in baza locala (pentru offline) si se creeaza sesiunea. */
     private suspend fun onlineSuccess(holder: TokenHolder, provider: String, passwordHash: String): AuthResult {
+        // sesiune reala pe server: datele pentru reautentificare nu mai sunt necesare
+        forgetDeferredLogin()
         val email = holder.user.email
         val ownerKey = holder.user.id.toString()
         val sessionProvider = holder.provider ?: provider

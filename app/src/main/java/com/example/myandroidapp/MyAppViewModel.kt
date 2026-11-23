@@ -77,6 +77,17 @@ class MyAppViewModel(
     init {
         Log.d(TAG, "init")
         viewModelScope.launch {
+            // O sesiune facuta offline intr-o pornire anterioara a aplicatiei nu mai poate trece singura
+            // pe server (datele de login sunt tinute doar in memorie): cerem un login nou, ca postarile
+            // salvate offline sa poata fi trimise. Postarile din coada raman pe telefon.
+            val prefs = userPreferencesRepository.userPreferencesStream.first()
+            if (prefs.token.startsWith("local-") && !authRepository.canUpgradeOfflineSession()) {
+                _notice.value = "Ultima conectare a fost făcută fără server. Conectează-te din nou, " +
+                        "ca postările salvate offline să poată fi trimise."
+                logout(revokeOnServer = false) {}
+            }
+        }
+        viewModelScope.launch {
             // Dupa orice login reusit (indiferent de metoda), contul ajunge in baza locala cu rolul lui
             userPreferencesRepository.userPreferencesStream.collect { prefs ->
                 try {

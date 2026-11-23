@@ -127,6 +127,26 @@ class PostsViewModel(
         private set
 
     /** Postarile create offline care asteapta sa fie trimise pe server (bannerul offline). */
+    var syncing by mutableStateOf(false)
+        private set
+
+    /** Butonul "Trimite acum" din banner. */
+    fun syncNow() {
+        if (syncing) return
+        viewModelScope.launch {
+            syncing = true
+            val done = try {
+                postRepository.syncNow()
+            } catch (e: Exception) {
+                Log.w(TAG, "syncNow failed", e)
+                false
+            }
+            if (done) postRepository.refresh()
+            else message = "Serverul nu răspunde încă. Postările rămân salvate și se trimit automat."
+            syncing = false
+        }
+    }
+
     val pendingCount: StateFlow<Int> = postRepository.pendingCount()
         .stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
