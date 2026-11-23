@@ -52,6 +52,7 @@ class AppContainer(val context: Context) {
             database.itemDao(),
             database.moderationDao(),
             currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
+            ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
             scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
         )
     }

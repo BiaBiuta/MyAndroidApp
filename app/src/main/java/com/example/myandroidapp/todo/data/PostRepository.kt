@@ -38,6 +38,9 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import com.example.myandroidapp.todo.data.remote.ServerStats
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.withContext
 import kotlin.collections.List
 
@@ -65,6 +68,7 @@ class PostRepository(
     private val moderationDao: ModerationDao,
     // cheia contului conectat acum (id-ul de pe server): doar postarile lui din coada se trimit
     private val currentOwnerKey: suspend () -> String,
+    private val ownerKeys: Flow<String> = flowOf(""),
     // programeaza sincronizarea cand revine reteaua (WorkManager), pentru ce a ramas in coada
     private val scheduleSync: () -> Unit = {}
 ) {
@@ -83,9 +87,10 @@ class PostRepository(
         onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
 
-    // Doar postarile publice (lista principala)
-    val itemStream by lazy { itemDao.getAll() }
-
+//    // Doar postarile publice (lista principala)
+//    val itemStream by lazy { itemDao.getAll() }
+@OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+val itemStream: Flow<List<Post>> by lazy { ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.getVisibleTo(it) } }
     // "Postarile mele": postarile publice ale unui utilizator
     fun publicItemsOf(ownerKey: String): Flow<List<Post>> = itemDao.getPublicByOwner(ownerKey)
 
@@ -526,8 +531,10 @@ class PostRepository(
         } else this
 
     /** Cate postari asteapta sa fie trimise (afisat in bannerul offline). */
-    fun pendingCount(): Flow<Int> = itemDao.observeUnsyncedCount()
-
+//    fun pendingCount(): Flow<Int> = itemDao.observeUnsyncedCount()
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    fun pendingCount(): Flow<Int> =
+        ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.observeUnsyncedCountFor(it) }
     private suspend fun handleItemDeleted(item: Post) {
         Log.d(TAG, "handleItemDeleted ${item.id}")
         // o editare offline a acestei postari va primi 410 la sincronizare (-> ciorna privata)

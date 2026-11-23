@@ -4,7 +4,7 @@ import com.example.myandroidapp.iot.crypto.PairingCrypto
 import com.google.gson.JsonParser
 import java.security.Signature
 
-/** O actualizare de configurare / firmware, asa cum o publica producatorul (server/updates/*.json). */
+///** O actualizare de configurare / firmware, asa cum o publica producatorul (server/updates/*.json). */
 data class UpdateManifest(
     val id: String = "",
     val keyId: String = "",

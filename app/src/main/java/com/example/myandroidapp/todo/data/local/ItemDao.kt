@@ -20,6 +20,17 @@ abstract class ItemDao {
     )
     abstract fun getAll(): Flow<List<Post>>
 
+    // ===== NOU =====
+    // Lista principala pentru contul conectat (ownerKey): postarile NESINCRONIZATE
+    // (create / editate offline) le vede DOAR autorul lor; ceilalti le vad dupa sincronizare.
+    @Query(
+        "SELECT * FROM Posts WHERE isPrivate = 0 AND isDeleted = 0 " +
+                "AND id NOT IN (SELECT postId FROM hidden_posts) " +
+                "AND (user_id = :ownerKey OR (isNotSaved = 0 AND syncStatus = 'SYNCED')) " +
+                "ORDER BY created_at DESC"
+    )
+    abstract fun getVisibleTo(ownerKey: String): Flow<List<Post>>
+
     // "Postarile mele" (rol USER): postarile publice ale unui utilizator
     @Query(
         "SELECT * FROM Posts WHERE isPrivate = 0 AND isDeleted = 0 AND user_id = :ownerKey " +
@@ -64,6 +75,11 @@ abstract class ItemDao {
     // Postarile din coada (create offline, inca netrimise) - pentru bannerul offline
     @Query("SELECT COUNT(*) FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0 AND syncStatus = 'PENDING'")
     abstract fun observeUnsyncedCount(): Flow<Int>
+
+    // ===== NOU =====
+    // Acelasi numar, dar doar pentru contul conectat (nu numara postarile altui cont)
+    @Query("SELECT COUNT(*) FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0 AND syncStatus = 'PENDING' AND user_id = :ownerKey")
+    abstract fun observeUnsyncedCountFor(ownerKey: String): Flow<Int>
 
     @Query("DELETE FROM Posts WHERE id = :id")
     abstract suspend fun deleteById(id: String): Unit
