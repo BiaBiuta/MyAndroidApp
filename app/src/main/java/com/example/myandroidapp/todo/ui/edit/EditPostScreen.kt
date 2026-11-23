@@ -116,7 +116,7 @@ class EditPostViewModel(
                         post = post,
                         title = post.title,
                         description = post.description,
-                        photo = post.photo,
+                        photo = post.displayPhoto,
                         rating = post.rating,
                         visitDate = post.visit_date,
                         place = post.place,
@@ -139,9 +139,9 @@ class EditPostViewModel(
         if (value.length <= MAX_DESCRIPTION) uiState = uiState.copy(description = value, error = null)
     }
 
-    fun onPhotoPicked(base64: String?) {
-        uiState = if (base64 == null) uiState.copy(error = "Imaginea nu a putut fi citită.")
-        else uiState.copy(photo = base64, error = null)
+    fun onPhotoPicked(photo: String?) {
+        uiState = if (photo == null) uiState.copy(error = "Imaginea nu a putut fi citită.")
+        else uiState.copy(photo = photo, error = null)
     }
 
     fun onRatingChange(value: Int) {
@@ -160,10 +160,10 @@ class EditPostViewModel(
         uiState = uiState.copy(isDraft = value)
     }
 
-    private fun edited(original: Post) = original.copy(
+    // poza: fisier nou (se urca la sincronizare), cea de pe server sau cea veche (Base64)
+    private fun edited(original: Post) = original.withPhoto(uiState.photo).copy(
         title = uiState.title.trim(),
         description = uiState.description.trim(),
-        photo = uiState.photo,
         rating = uiState.rating,
         visit_date = uiState.visitDate,
         place = uiState.place.trim(),
@@ -180,7 +180,7 @@ class EditPostViewModel(
     fun save() {
         val original = uiState.post ?: return
         val changed = edited(original)
-        if (changed.title.isEmpty() && changed.description.isEmpty() && changed.photo.isEmpty()) {
+        if (changed.title.isEmpty() && changed.description.isEmpty() && changed.displayPhoto.isEmpty()) {
             uiState = uiState.copy(error = "Postarea trebuie să aibă un titlu, un text sau o poză.")
             return
         }

@@ -24,7 +24,12 @@ data class Post(
     // UUID generat pe telefon: aceeasi postare are acelasi id si offline, si pe server
     @PrimaryKey var id: String = "",
     var title: String = "",
+    // poza in formatul vechi (Base64 in postare); postarile noi folosesc photoPath / photo_url
     var photo: String = "",
+    // poza ca fisier pe telefon (camera / galerie); doar locala, nu se trimite la server
+    @field:LocalOnly var photoPath: String = "",
+    // adresa pozei pe server ("/photos/<id>"), dupa ce a fost urcata (inaintea postarii)
+    var photo_url: String = "",
     var description: String = "",
     // 1..5 stele (0 = fara rating, la postarile vechi)
     var rating: Int = 0,
@@ -56,5 +61,26 @@ data class Post(
     // mesajul serverului cand sincronizarea a esuat (FAILED)
     var syncError: String = "",
     // stearsa offline ("tombstone"): ascunsa imediat, stearsa de tot dupa confirmarea serverului
-    var isDeleted: Boolean = false
-)
+    var isDeleted: Boolean = false,
+    // ---- de la server, calculate pentru utilizatorul conectat ----
+    var like_count: Int = 0,
+    var liked_by_me: Boolean = false,
+    var comment_count: Int = 0
+) {
+    /**
+     * Poza de afisat: fisierul local (daca exista inca), altfel cea de pe server, altfel cea veche
+     * (Base64). "" = fara poza.
+     */
+    val displayPhoto: String
+        get() = photoPath.takeIf { it.isNotBlank() && java.io.File(it).exists() }
+            ?: photo_url.ifBlank { photo }
+
+    /** Aceeasi postare cu alta poza (valoarea vine din formular: fisier local, adresa server sau Base64). */
+    fun withPhoto(value: String): Post = when {
+        value == displayPhoto -> this
+        value.isBlank() -> copy(photo = "", photoPath = "", photo_url = "")
+        value.startsWith("/photos/") -> copy(photo = "", photoPath = "", photo_url = value)
+        value.startsWith("data:") -> copy(photo = value, photoPath = "", photo_url = "")
+        else -> copy(photo = "", photoPath = value, photo_url = "")
+    }
+}

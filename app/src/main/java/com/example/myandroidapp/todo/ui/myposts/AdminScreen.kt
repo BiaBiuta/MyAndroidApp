@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.admin
 
+import androidx.compose.material.icons.filled.Search
 import com.example.myapplication.network.MyNetworkStatusViewModel
 import com.example.myandroidapp.todo.ui.posts.PostComponent
 import com.example.myandroidapp.todo.data.remote.ServerStats
@@ -337,9 +338,9 @@ private fun ReportedPostsList(
                         text = post.description.ifBlank { "(fără descriere)" },
                         style = MaterialTheme.typography.bodyLarge
                     )
-                    if (post.photo.isNotBlank()) {
+                    if (post.displayPhoto.isNotBlank()) {
                         Spacer(Modifier.height(8.dp))
-                        PostPhoto(photo = post.photo)
+                        PostPhoto(photo = post.displayPhoto)
                     }
                     if (post.location.latitude != 0.0 || post.location.longitude != 0.0) {
                         Spacer(Modifier.height(8.dp))
@@ -469,20 +470,49 @@ private fun ModerationTab(
     onToggleHidden: (Post) -> Unit,
     onDelete: (Post) -> Unit
 ) {
+    // cautare (titlu, loc, text, autor) si filtru dupa vizibilitate, ca in propunere (ecranul 3)
+    var query by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("") }
+    var visibility by androidx.compose.runtime.saveable.rememberSaveable { mutableIntStateOf(0) } // 0 toate, 1 vizibile, 2 ascunse
+    val words = query.trim().lowercase().split(" ").filter { it.isNotEmpty() }
+    val shown = posts.filter { post ->
+        (visibility == 0 || (visibility == 1 && !post.hidden) || (visibility == 2 && post.hidden)) &&
+                words.all { w ->
+                    "${post.title} ${post.place} ${post.description} ${post.user_first_name}".lowercase().contains(w)
+                }
+    }
     LazyColumn(modifier = Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
         item {
             StatsRow(stats = stats, onRefresh = onRefresh)
         }
-        if (posts.isEmpty()) {
+        item {
+            androidx.compose.material3.OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                placeholder = { Text("Caută după titlu, loc sau autor") },
+                singleLine = true,
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                listOf("Toate (${posts.size})", "Vizibile", "Ascunse (${posts.count { it.hidden }})").forEachIndexed { index, label ->
+                    androidx.compose.material3.FilterChip(
+                        selected = visibility == index,
+                        onClick = { visibility = index },
+                        label = { Text(label) }
+                    )
+                }
+            }
+        }
+        if (shown.isEmpty()) {
             item {
                 Text(
-                    "Nicio postare de moderat.",
+                    if (posts.isEmpty()) "Nicio postare de moderat." else "Nicio postare nu se potrivește căutării.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.padding(24.dp)
                 )
             }
         }
-        items(posts, key = { it.id }) { post ->
+        items(shown, key = { it.id }) { post ->
             PostComponent(
                 dep = post,
                 onClick = {},

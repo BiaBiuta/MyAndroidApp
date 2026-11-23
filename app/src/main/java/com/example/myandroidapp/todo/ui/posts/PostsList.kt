@@ -1,4 +1,7 @@
 package com.example.myandroidapp.todo.ui.posts
+import androidx.compose.material.icons.filled.ChatBubbleOutline
+import androidx.compose.material.icons.filled.FavoriteBorder
+import androidx.compose.material.icons.filled.Favorite
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
@@ -65,7 +68,9 @@ fun PostList(
     actions: @Composable (Post) -> Unit = {},
     // insignele de sincronizare apar doar pe postarile proprii (doar autorul le are in coada)
     isOwn: (Post) -> Boolean = { false },
-    emptyText: String = "Nicio postare de afișat."
+    emptyText: String = "Nicio postare de afișat.",
+    // aprecierea din lista (null = utilizatorul curent nu poate aprecia: admin / vizitator)
+    onToggleLike: ((Post) -> Unit)? = null
 ) {
     if (posts.isEmpty()) {
         Box(modifier = modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -79,7 +84,13 @@ fun PostList(
             .padding(horizontal = 12.dp)
     ) {
         items(posts, key = { it.id }) { item ->
-            PostComponent(item, onClick = { onPostClick(item.id) }, showSyncStatus = isOwn(item), actions = { actions(item) })
+            PostComponent(
+                item,
+                onClick = { onPostClick(item.id) },
+                showSyncStatus = isOwn(item),
+                onToggleLike = onToggleLike?.let { toggle -> { toggle(item) } },
+                actions = { actions(item) }
+            )
         }
     }
 }
@@ -112,6 +123,7 @@ fun PostComponent(
     dep: Post,
     onClick: () -> Unit,
     showSyncStatus: Boolean = false,
+    onToggleLike: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {}
 ) {
     Card(
@@ -122,8 +134,8 @@ fun PostComponent(
         shape = RoundedCornerShape(16.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        if (dep.photo.isNotBlank()) {
-            PostPhoto(photo = dep.photo, height = 190.dp, rounded = false)
+        if (dep.displayPhoto.isNotBlank()) {
+            PostPhoto(photo = dep.displayPhoto, height = 190.dp, rounded = false)
         }
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             if (dep.title.isNotBlank()) {
@@ -185,6 +197,10 @@ fun PostComponent(
                 style = MaterialTheme.typography.labelMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+            // aprecieri si comentarii (doar postarile publicate au)
+            if (dep.status == PostStatus.ACTIVE && !dep.isPrivate) {
+                SocialRow(post = dep, onToggleLike = onToggleLike)
+            }
             // Actiunile permise rolului curent (publica / editeaza / sterge / raporteaza)
             actions()
         }
@@ -300,10 +316,13 @@ fun PostPhoto(
             )
         }
     } else {
-        Image(
-            painter = rememberImagePainter(data = photo),
+        // fisier local sau poza de pe server (cu token si cache, vezi PhotoLoader)
+        val context = androidx.compose.ui.platform.LocalContext.current
+        coil.compose.AsyncImage(
+            model = com.example.myandroidapp.core.ui.PhotoLoader.model(photo),
+            imageLoader = com.example.myandroidapp.core.ui.PhotoLoader.get(context),
             contentDescription = "Poza postării",
-            modifier = imageModifier,
+            modifier = imageModifier.background(MaterialTheme.colorScheme.surfaceVariant),
             contentScale = ContentScale.Crop
         )
     }
@@ -315,5 +334,40 @@ fun PostDetail(post: Post, onPostClick: (id: String) -> Unit) {
     Log.d("PostDetail","recompose id = ${post.id}")
     Row{
         ClickableText(text= AnnotatedString(post.id)) { }
+    }
+}
+
+/** Aprecieri si comentarii: inima se poate apasa doar daca utilizatorul are voie sa aprecieze. */
+@Composable
+fun SocialRow(post: Post, onToggleLike: (() -> Unit)?) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+        val liked = post.liked_by_me
+        val heart = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder
+        val tint = if (liked) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
+        if (onToggleLike != null) {
+            androidx.compose.material3.IconButton(onClick = onToggleLike, modifier = Modifier.size(36.dp)) {
+                Icon(heart, contentDescription = if (liked) "Retrage aprecierea" else "Apreciază", tint = tint)
+            }
+        } else {
+            Icon(heart, contentDescription = null, tint = tint, modifier = Modifier.padding(8.dp).size(20.dp))
+        }
+        Text(
+            "${post.like_count}",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.semantics { contentDescription = "${post.like_count} aprecieri" }
+        )
+        Spacer(modifier = Modifier.width(16.dp))
+        Icon(
+            Icons.Default.ChatBubbleOutline,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.size(18.dp)
+        )
+        Spacer(modifier = Modifier.width(6.dp))
+        Text(
+            "${post.comment_count}",
+            style = MaterialTheme.typography.labelLarge,
+            modifier = Modifier.semantics { contentDescription = "${post.comment_count} comentarii" }
+        )
     }
 }

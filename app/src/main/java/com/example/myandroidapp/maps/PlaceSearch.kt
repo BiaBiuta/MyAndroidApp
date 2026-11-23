@@ -26,8 +26,10 @@ data class Place(val name: String, val latitude: Double, val longitude: Double)
 /**
  * Cautarea locurilor dupa nume si numele unui punct de pe harta, fara servicii platite:
  *  1. Geocoder-ul din Android (gratuit, inclus in sistem);
- *  2. daca telefonul nu il are sau nu gaseste nimic: Nominatim (cautarea OpenStreetMap, gratuita).
- * Ruleaza pe un fir de fundal; fara internet intoarce o lista goala / null.
+ *  2. Photon (cautare gratuita pe datele OpenStreetMap, komoot);
+ *  3. Nominatim (cautarea oficiala OpenStreetMap).
+ * Se trece la urmatorul doar daca precedentul nu gaseste nimic sau nu raspunde.
+ * Ruleaza pe un fir de fundal; [lastProblem] spune de ce nu s-a gasit nimic (ex. fara internet).
  */
 object PlaceSearch {
     private const val TAG = "PlaceSearch"
@@ -39,15 +41,34 @@ object PlaceSearch {
         .readTimeout(10, TimeUnit.SECONDS)
         .build()
 
+    /** De ce ultima cautare n-a gasit nimic: null = pur si simplu nu exista rezultate. */
+    @Volatile
+    var lastProblem: String? = null
+        private set
+
+    // cate servicii online au esuat din cauza retelei la ultima cautare
+    @Volatile
+    private var networkFailures = 0
+
     suspend fun search(context: Context, query: String): List<Place> = withContext(Dispatchers.IO) {
         val text = query.trim()
+        lastProblem = null
+        networkFailures = 0
         if (text.length < 2) return@withContext emptyList()
-        geocoderSearch(context, text).ifEmpty { nominatimSearch(context, text) }
+        val found = geocoderSearch(context, text)
+            .ifEmpty { photonSearch(text) }
+            .ifEmpty { nominatimSearch(text) }
+        if (found.isEmpty() && networkFailures >= 2) {
+            lastProblem = "Căutarea are nevoie de internet pe telefon (Wi-Fi sau date mobile)."
+        }
+        found.distinctBy { it.name }
     }
 
     /** Numele locului de la coordonatele date (ex. dupa GPS sau o atingere pe harta). */
     suspend fun nameOf(context: Context, latitude: Double, longitude: Double): String? = withContext(Dispatchers.IO) {
-        geocoderName(context, latitude, longitude) ?: nominatimName(context, latitude, longitude)
+        geocoderName(context, latitude, longitude)
+            ?: photonName(latitude, longitude)
+            ?: nominatimName(latitude, longitude)
     }
 
     // ---------- Geocoder (Android) ----------
@@ -82,16 +103,62 @@ object PlaceSearch {
         return parts.take(3).joinToString(", ").ifEmpty { address.getAddressLine(0).orEmpty() }
     }
 
+    // ---------- Photon (komoot, date OpenStreetMap) ----------
+
+    private fun photonSearch(query: String): List<Place> = try {
+        val url = "https://photon.komoot.io/api/".toHttpUrl().newBuilder()
+            .addQueryParameter("q", query)
+            .addQueryParameter("limit", "5")
+            .build()
+        val body = get(url.toString())
+        if (body == null) emptyList()
+        else JsonParser().parse(body).asJsonObject.getAsJsonArray("features").mapNotNull { feature ->
+            val o = feature.asJsonObject
+            val coordinates = o.getAsJsonObject("geometry")?.getAsJsonArray("coordinates") ?: return@mapNotNull null
+            val properties = o.getAsJsonObject("properties")
+            Place(photonLabel(properties), coordinates[1].asDouble, coordinates[0].asDouble)
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "photon search failed", e)
+        emptyList()
+    }
+
+    private fun photonName(latitude: Double, longitude: Double): String? = try {
+        val url = "https://photon.komoot.io/reverse".toHttpUrl().newBuilder()
+            .addQueryParameter("lat", latitude.toString())
+            .addQueryParameter("lon", longitude.toString())
+            .build()
+        get(url.toString())?.let { body ->
+            JsonParser().parse(body).asJsonObject.getAsJsonArray("features")
+                ?.firstOrNull()?.asJsonObject?.getAsJsonObject("properties")?.let(::photonLabel)
+                ?.takeIf { it.isNotBlank() }
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "photon reverse failed", e)
+        null
+    }
+
+    private fun photonLabel(properties: com.google.gson.JsonObject?): String {
+        if (properties == null) return ""
+        fun field(name: String) = properties.get(name)?.takeIf { !it.isJsonNull }?.asString
+        return listOfNotNull(
+            field("name"),
+            field("city") ?: field("county"),
+            field("state"),
+            field("country")?.takeIf { field("countrycode") != "RO" }
+        ).map { it.trim() }.filter { it.isNotEmpty() }.distinct().take(3).joinToString(", ")
+    }
+
     // ---------- Nominatim (OpenStreetMap) ----------
 
-    private fun nominatimSearch(context: Context, query: String): List<Place> = try {
+    private fun nominatimSearch(query: String): List<Place> = try {
         val url = "https://nominatim.openstreetmap.org/search".toHttpUrl().newBuilder()
             .addQueryParameter("q", query)
             .addQueryParameter("format", "jsonv2")
             .addQueryParameter("limit", "5")
             .addQueryParameter("accept-language", "ro")
             .build()
-        val body = get(context, url.toString()) ?: return emptyList()
+        val body = get(url.toString()) ?: return emptyList()
         JsonParser().parse(body).asJsonArray.mapNotNull { element ->
             val o = element.asJsonObject
             val lat = o.get("lat")?.asString?.toDoubleOrNull() ?: return@mapNotNull null
@@ -103,7 +170,7 @@ object PlaceSearch {
         emptyList()
     }
 
-    private fun nominatimName(context: Context, latitude: Double, longitude: Double): String? = try {
+    private fun nominatimName(latitude: Double, longitude: Double): String? = try {
         val url = "https://nominatim.openstreetmap.org/reverse".toHttpUrl().newBuilder()
             .addQueryParameter("lat", latitude.toString())
             .addQueryParameter("lon", longitude.toString())
@@ -111,7 +178,7 @@ object PlaceSearch {
             .addQueryParameter("zoom", "14")
             .addQueryParameter("accept-language", "ro")
             .build()
-        get(context, url.toString())?.let { body ->
+        get(url.toString())?.let { body ->
             JsonParser().parse(body).asJsonObject.get("display_name")?.asString?.let(::shorten)
         }
     } catch (e: Exception) {
@@ -119,14 +186,26 @@ object PlaceSearch {
         null
     }
 
-    private fun get(context: Context, url: String): String? {
+    /** GET catre un serviciu public; null daca nu raspunde (retea) sau refuza. */
+    private fun get(url: String): String? {
         val request = Request.Builder()
             .url(url)
-            // politica Nominatim: aplicatia se identifica
-            .header("User-Agent", "WanderLog/1.0 (${context.packageName})")
+            // politica OpenStreetMap / Nominatim: aplicatia se identifica unic
+            .header("User-Agent", OsmConfig.USER_AGENT)
+            .header("Accept-Language", "ro,en")
             .build()
-        http.newCall(request).execute().use { response ->
-            return if (response.isSuccessful) response.body?.string() else null
+        return try {
+            http.newCall(request).execute().use { response ->
+                if (response.isSuccessful) response.body?.string()
+                else {
+                    Log.w(TAG, "$url -> HTTP ${response.code}")
+                    null
+                }
+            }
+        } catch (e: java.io.IOException) {
+            networkFailures += 1
+            Log.w(TAG, "$url: fara retea", e)
+            null
         }
     }
 

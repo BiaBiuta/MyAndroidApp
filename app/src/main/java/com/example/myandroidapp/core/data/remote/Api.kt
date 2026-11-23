@@ -23,7 +23,16 @@ object Api {
     // public: repository-ul citeste cu el si corpul erorilor (ex. postarea din raspunsul 409)
     val gson = GsonBuilder()
         .registerTypeAdapter(Location::class.java, LocationDeserializer())
+        // campurile marcate @LocalOnly (ex. calea pozei pe telefon) nu pleaca la server
+        .setExclusionStrategies(object : com.google.gson.ExclusionStrategy {
+            override fun shouldSkipField(f: com.google.gson.FieldAttributes) =
+                f.getAnnotation(com.example.myandroidapp.todo.data.LocalOnly::class.java) != null
+            override fun shouldSkipClass(clazz: Class<*>) = false
+        })
         .create()
+
+    /** Adresa completa a unei resurse de pe server, ex. "/photos/<id>" -> "http://host/photos/<id>". */
+    fun absoluteUrl(path: String): String = "http://$host$path"
 
     val tokenInterceptor = TokenInterceptor()
 
@@ -32,7 +41,7 @@ object Api {
         // timp scurt de conectare: daca serverul nu raspunde, aplicatia trece repede pe datele salvate
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS) // pozele (Base64) pot fi mari
+        .writeTimeout(60, TimeUnit.SECONDS) // pozele pot fi mari
         .build()
 
     val retrofit: Retrofit = Retrofit.Builder()

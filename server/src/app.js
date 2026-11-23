@@ -1,11 +1,13 @@
 'use strict';
 
 const crypto = require('node:crypto');
+const fs = require('node:fs');
+const path = require('node:path');
 const http = require('node:http');
 const config = require('./config');
 const { Store } = require('./store');
 const { WsHub } = require('./websocket');
-const { ApiError, Router, readJsonBody, sendJson, bearerToken } = require('./http');
+const { ApiError, Router, readJsonBody, readRawBody, sendJson, bearerToken } = require('./http');
 const security = require('./security');
 const { registerDeviceRoutes } = require('./devices');
 
@@ -72,7 +74,7 @@ function createApp(options = {}) {
     if (user.role !== 'ADMIN') throw new ApiError(403, 'Doar administratorii pot face această operație.');
   }
 
-  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 4, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats', 'devices'], time: new Date().toISOString() } }));
+  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 5, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats', 'devices', 'photos', 'likes', 'comments'], time: new Date().toISOString() } }));
 
   router.add('POST', '/signup', ({ body }) => {
     const email = security.normalizeEmail(body.email);
@@ -186,6 +188,7 @@ function createApp(options = {}) {
   // ---------------------------------------------------------------------------
 
   const STATUSES = ['ACTIVE', 'DRAFT'];
+  const PHOTO_URL = /^\/photos\/[a-zA-Z0-9-]{8,64}$/;
   const ID_PATTERN = /^[a-zA-Z0-9-]{8,64}$/;
 
   /** Locatia vine ca obiect {latitude, longitude} sau ca text "lat,lng"; o pastram ca text. */
@@ -208,7 +211,10 @@ function createApp(options = {}) {
     const title = typeof body.title === 'string' ? body.title.trim() : '';
     const description = typeof body.description === 'string' ? body.description.trim() : '';
     const photo = typeof body.photo === 'string' ? body.photo : '';
-    if (!title && !description && !photo) {
+    // poza urcata separat (PUT /photos/:id): postarea pastreaza doar adresa ei
+    const photoUrl = typeof body.photo_url === 'string' ? body.photo_url : '';
+    if (photoUrl && !PHOTO_URL.test(photoUrl)) throw new ApiError(400, 'Adresa pozei nu este validă.');
+    if (!title && !description && !photo && !photoUrl) {
       throw new ApiError(400, 'Postarea trebuie să aibă un titlu, un text sau o poză.');
     }
     if (title.length > 120) throw new ApiError(400, 'Titlul poate avea cel mult 120 de caractere.');
@@ -226,7 +232,7 @@ function createApp(options = {}) {
     if (!STATUSES.includes(status)) throw new ApiError(400, 'Starea postării trebuie să fie ACTIVE sau DRAFT.');
     const place = typeof body.place === 'string' ? body.place.trim() : '';
     if (place.length > 160) throw new ApiError(400, 'Numele locului poate avea cel mult 160 de caractere.');
-    return { title, description, photo, place, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
+    return { title, description, photo, photo_url: photoUrl, place, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
   }
 
   /** Ce vede un utilizator: postarile active si neascunse; ale lui oricum; adminul si pe cele ascunse. */
@@ -241,8 +247,33 @@ function createApp(options = {}) {
   function broadcastPost(event, post) {
     hub.broadcastWith((viewer) => {
       if (event === 'deleted' || !canSee(post, viewer)) return { event: 'deleted', payload: { item: post } };
-      return { event, payload: { item: post } };
+      return { event, payload: { item: forViewer(post, viewer) } };
     });
+  }
+
+  store.data.photos = store.data.photos || [];
+  store.data.likes = store.data.likes || [];
+  store.data.comments = store.data.comments || [];
+
+  /** Postarea, cum o vede un anumit utilizator: cu numarul de aprecieri / comentarii si daca a apreciat-o. */
+  function forViewer(post, viewer) {
+    const likes = store.data.likes.filter((l) => l.post_id === post.id);
+    return {
+      ...post,
+      like_count: likes.length,
+      liked_by_me: Boolean(viewer) && likes.some((l) => l.user_id === String(viewer.id)),
+      comment_count: store.data.comments.filter((c) => c.post_id === post.id).length,
+    };
+  }
+
+  /** Poza urcata trebuie sa fie a autorului postarii. */
+  function requireOwnPhoto(photoUrl, user) {
+    if (!photoUrl) return;
+    const id = photoUrl.slice('/photos/'.length);
+    const photo = store.data.photos.find((p) => p.id === id);
+    if (!photo || photo.owner_id !== String(user.id)) {
+      throw new ApiError(400, 'Poza postării nu a fost găsită. Încărcați-o din nou.');
+    }
   }
 
   function requireAuthor(post, user) {
@@ -283,6 +314,7 @@ function createApp(options = {}) {
   }
 
   function createPost(id, input, user, updatedAt) {
+    requireOwnPhoto(input.photo_url, user);
     const now = new Date().toISOString();
     const post = {
       id,
@@ -305,11 +337,11 @@ function createApp(options = {}) {
   router.add(
     'GET',
     '/posts',
-    ({ user }) => ({ status: 200, body: store.listPosts().filter((p) => canSee(p, user)) }),
+    ({ user }) => ({ status: 200, body: store.listPosts().filter((p) => canSee(p, user)).map((p) => forViewer(p, user)) }),
     { auth: true },
   );
 
-  router.add('GET', '/post/:id', ({ params, user }) => ({ status: 200, body: findVisiblePostOr404(params.id, user) }), {
+  router.add('GET', '/post/:id', ({ params, user }) => ({ status: 200, body: forViewer(findVisiblePostOr404(params.id, user), user) }), {
     auth: true,
   });
 
@@ -325,9 +357,9 @@ function createApp(options = {}) {
       const existing = store.findPost(id);
       if (existing) {
         requireAuthor(existing, user);
-        return { status: 200, body: existing }; // trimisa deja (ex. raspunsul s-a pierdut pe drum)
+        return { status: 200, body: forViewer(existing, user) }; // trimisa deja (ex. raspunsul s-a pierdut pe drum)
       }
-      return { status: 201, body: createPost(id, input, user, editTime(body.updated_at)) };
+      return { status: 201, body: forViewer(createPost(id, input, user, editTime(body.updated_at)), user) };
     },
     { auth: true },
   );
@@ -344,21 +376,22 @@ function createApp(options = {}) {
 
       if (!existing) {
         requirePublisher(user);
-        return { status: 201, body: createPost(params.id, validatePostInput(body), user, updatedAt) };
+        return { status: 201, body: forViewer(createPost(params.id, validatePostInput(body), user, updatedAt), user) };
       }
 
       requireAuthor(existing, user);
       if (Date.parse(updatedAt) < Date.parse(existing.updated_at)) {
         // pe alt dispozitiv s-a facut o modificare mai noua: o pastram pe aceea
         throw new ApiError(409, 'Această postare a fost modificată pe alt dispozitiv. Se păstrează varianta mai nouă.', {
-          item: existing,
+          item: forViewer(existing, user),
         });
       }
       const input = validatePostInput({ ...existing, ...body });
+      requireOwnPhoto(input.photo_url, user);
       const updated = { ...existing, ...input, updated_at: updatedAt };
       store.replacePost(updated);
       broadcastPost('updated', updated);
-      return { status: 200, body: updated };
+      return { status: 200, body: forViewer(updated, user) };
     },
     { auth: true },
   );
@@ -375,8 +408,222 @@ function createApp(options = {}) {
       const isOwner = existing.user_id === String(user.id);
       if (user.role !== 'ADMIN') requireAuthor(existing, user);
       store.deletePost(existing.id, { byModerator: !isOwner });
+      // aprecierile si comentariile postarii dispar odata cu ea
+      store.data.likes = store.data.likes.filter((l) => l.post_id !== existing.id);
+      store.data.comments = store.data.comments.filter((c) => c.post_id !== existing.id);
+      store.save();
       broadcastPost('deleted', existing);
       return { status: 204 };
+    },
+    { auth: true },
+  );
+
+
+  // ---------------------------------------------------------------------------
+  // Poze (fisiere separate de postari)
+  //
+  //  - telefonul urca poza INAINTE de postare: PUT /photos/:id (id = UUID generat pe telefon,
+  //    deci reincercarea dupa o conexiune cazuta nu dubleaza poza); corpul = JPEG / PNG / WebP;
+  //  - postarea primeste doar adresa ("/photos/<id>"), nu poza in sine;
+  //  - GET /photos/:id: doar autorul pozei sau cine poate vedea o postare care o foloseste
+  //    (poza unei ciorne nu e vizibila altora).
+  // ---------------------------------------------------------------------------
+
+  const photosDir = path.join(settings.dataDir, 'photos');
+  const MAX_PHOTO_BYTES = settings.maxPhotoBytes || 3 * 1024 * 1024;
+
+  function imageType(buffer) {
+    if (buffer.length > 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+    if (buffer.length > 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) return 'image/png';
+    if (buffer.length > 12 && buffer.toString('ascii', 0, 4) === 'RIFF' && buffer.toString('ascii', 8, 12) === 'WEBP') return 'image/webp';
+    return null;
+  }
+
+  router.add(
+    'PUT',
+    '/photos/:id',
+    async ({ req, params, user }) => {
+      requirePublisher(user);
+      if (!ID_PATTERN.test(params.id)) throw new ApiError(400, 'Identificator de poză invalid.');
+      const existing = store.data.photos.find((p) => p.id === params.id);
+      if (existing && existing.owner_id !== String(user.id)) throw new ApiError(409, 'Identificatorul pozei este deja folosit.');
+      const data = await readRawBody(req, MAX_PHOTO_BYTES);
+      const type = imageType(data);
+      // verificam continutul, nu doar ce declara clientul
+      if (!type) throw new ApiError(415, 'Fișierul nu este o poză (JPEG, PNG sau WebP).');
+      fs.mkdirSync(photosDir, { recursive: true });
+      fs.writeFileSync(path.join(photosDir, params.id), data);
+      if (existing) {
+        existing.size = data.length;
+        existing.type = type;
+      } else {
+        store.data.photos.push({ id: params.id, owner_id: String(user.id), type, size: data.length, created_at: new Date().toISOString() });
+      }
+      store.save();
+      return { status: existing ? 200 : 201, body: { id: params.id, url: `/photos/${params.id}`, size: data.length } };
+    },
+    { auth: true, raw: true },
+  );
+
+  router.add(
+    'GET',
+    '/photos/:id',
+    ({ params, user }) => {
+      const photo = store.data.photos.find((p) => p.id === params.id);
+      const url = `/photos/${params.id}`;
+      const allowed = photo && (photo.owner_id === String(user.id) ||
+        store.data.posts.some((p) => p.photo_url === url && canSee(p, user)));
+      if (!allowed) throw new ApiError(404, 'Poza nu există.');
+      let data;
+      try {
+        data = fs.readFileSync(path.join(photosDir, photo.id));
+      } catch {
+        throw new ApiError(404, 'Poza nu există.');
+      }
+      return { status: 200, binary: data, contentType: photo.type, headers: { 'Cache-Control': 'private, max-age=86400' } };
+    },
+    { auth: true },
+  );
+
+  // ---------------------------------------------------------------------------
+  // Aprecieri si comentarii (doar conturile USER cu cont propriu; adminul poate sterge comentarii)
+  // ---------------------------------------------------------------------------
+
+  function requireMember(user) {
+    if (user.role !== 'USER' || user.provider === PROVIDERS.ANONYMOUS) {
+      throw new ApiError(403, user.role === 'ADMIN'
+        ? 'Administratorii nu apreciază și nu comentează postări.'
+        : 'Creați un cont pentru a aprecia sau comenta postări.');
+    }
+  }
+
+  function findPublicPostOr404(id, user) {
+    const post = findVisiblePostOr404(id, user);
+    if (post.status === 'DRAFT') throw new ApiError(409, 'O ciornă nu poate fi apreciată sau comentată.');
+    return post;
+  }
+
+  router.add(
+    'PUT',
+    '/post/:id/like',
+    ({ params, user }) => {
+      requireMember(user);
+      const post = findPublicPostOr404(params.id, user);
+      if (!store.data.likes.some((l) => l.post_id === post.id && l.user_id === String(user.id))) {
+        store.data.likes.push({ post_id: post.id, user_id: String(user.id), created_at: new Date().toISOString() });
+        store.save();
+        broadcastPost('updated', post);
+      }
+      return { status: 200, body: forViewer(post, user) };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'DELETE',
+    '/post/:id/like',
+    ({ params, user }) => {
+      requireMember(user);
+      const post = findVisiblePostOr404(params.id, user);
+      const before = store.data.likes.length;
+      store.data.likes = store.data.likes.filter((l) => !(l.post_id === post.id && l.user_id === String(user.id)));
+      if (store.data.likes.length !== before) {
+        store.save();
+        broadcastPost('updated', post);
+      }
+      return { status: 200, body: forViewer(post, user) };
+    },
+    { auth: true },
+  );
+
+  function publicComment(comment, viewer, post) {
+    return {
+      ...comment,
+      // autorul comentariului, autorul postarii si adminul pot sterge comentariul
+      can_delete: Boolean(viewer) && (comment.user_id === String(viewer.id) ||
+        post.user_id === String(viewer.id) || viewer.role === 'ADMIN'),
+    };
+  }
+
+  router.add(
+    'GET',
+    '/post/:id/comments',
+    ({ params, user }) => {
+      const post = findVisiblePostOr404(params.id, user);
+      const comments = store.data.comments
+        .filter((c) => c.post_id === post.id)
+        .sort((a, b) => a.created_at.localeCompare(b.created_at))
+        .map((c) => publicComment(c, user, post));
+      return { status: 200, body: comments };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'POST',
+    '/post/:id/comments',
+    ({ params, body, user }) => {
+      requireMember(user);
+      const post = findPublicPostOr404(params.id, user);
+      const text = typeof body.text === 'string' ? body.text.trim() : '';
+      if (!text) throw new ApiError(400, 'Comentariul nu poate fi gol.');
+      if (text.length > 500) throw new ApiError(400, 'Comentariul poate avea cel mult 500 de caractere.');
+      const comment = {
+        id: crypto.randomUUID(),
+        post_id: post.id,
+        user_id: String(user.id),
+        author: user.email.split('@')[0],
+        text,
+        created_at: new Date().toISOString(),
+      };
+      store.data.comments.push(comment);
+      store.save();
+      broadcastPost('updated', post);
+      return { status: 201, body: publicComment(comment, user, post) };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'DELETE',
+    '/comments/:id',
+    ({ params, user }) => {
+      const comment = store.data.comments.find((c) => c.id === params.id);
+      const post = comment && store.findPost(comment.post_id);
+      if (!comment || !post || !canSee(post, user)) throw new ApiError(404, 'Comentariul nu mai există.');
+      if (!publicComment(comment, user, post).can_delete) {
+        throw new ApiError(403, 'Puteți șterge doar comentariile proprii sau pe cele de la postările voastre.');
+      }
+      store.data.comments = store.data.comments.filter((c) => c.id !== comment.id);
+      store.save();
+      broadcastPost('updated', post);
+      return { status: 204 };
+    },
+    { auth: true },
+  );
+
+  // ---------------------------------------------------------------------------
+  // Profil: schimbarea parolei (conturile cu e-mail si parola)
+  // ---------------------------------------------------------------------------
+
+  router.add(
+    'POST',
+    '/me/password',
+    ({ body, user, claims }) => {
+      if (user.provider !== PROVIDERS.EMAIL) {
+        throw new ApiError(400, 'Contul dumneavoastră nu folosește o parolă (Google, Apple sau vizitator).');
+      }
+      const current = typeof body.currentPassword === 'string' ? body.currentPassword : '';
+      const next = typeof body.newPassword === 'string' ? body.newPassword : '';
+      if (!security.verifyPassword(current, user.passwordHash || security.DUMMY_HASH)) {
+        throw new ApiError(400, 'Parola actuală nu este corectă.');
+      }
+      if (current === next) throw new ApiError(400, 'Parola nouă trebuie să fie diferită de cea actuală.');
+      const problems = security.passwordProblems(next, user.email);
+      if (problems.length) throw new ApiError(400, `Parola nouă nu este suficient de sigură: ${problems.join(', ')}.`, { problems });
+      store.updateUser(user.id, { passwordHash: security.hashPassword(next) });
+      // celelalte sesiuni raman valabile pana expira; cea curenta continua
+      return { status: 200, body: { ...publicUser(store.findUserById(user.id)), changed: true } };
     },
     { auth: true },
   );
@@ -396,7 +643,7 @@ function createApp(options = {}) {
       const updated = { ...existing, hidden: body.hidden };
       store.replacePost(updated);
       broadcastPost('updated', updated);
-      return { status: 200, body: updated };
+      return { status: 200, body: forViewer(updated, user) };
     },
     { auth: true },
   );
@@ -512,7 +759,7 @@ function createApp(options = {}) {
         }
       }
 
-      const body = ['POST', 'PUT', 'PATCH'].includes(req.method)
+      const body = !route.raw && ['POST', 'PUT', 'PATCH'].includes(req.method)
         ? await readJsonBody(req, settings.maxBodyBytes)
         : {};
       const result = await route.handler({
@@ -523,7 +770,17 @@ function createApp(options = {}) {
         claims: session && session.claims,
       });
       status = result.status;
-      sendJson(res, result.status, result.body);
+      if (result.binary) {
+        res.writeHead(result.status, {
+          'Content-Type': result.contentType || 'application/octet-stream',
+          'Content-Length': result.binary.length,
+          'X-Content-Type-Options': 'nosniff',
+          ...(result.headers || {}),
+        });
+        res.end(result.binary);
+      } else {
+        sendJson(res, result.status, result.body);
+      }
     } catch (error) {
       if (error instanceof ApiError) {
         status = error.status;

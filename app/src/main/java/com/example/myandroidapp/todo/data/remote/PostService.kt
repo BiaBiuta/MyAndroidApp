@@ -9,6 +9,20 @@ import retrofit2.http.POST
 import retrofit2.http.PUT
 import retrofit2.http.Path
 
+/** Raspunsul la urcarea unei poze: adresa ei pe server ("/photos/<id>"). */
+data class PhotoUpload(val id: String = "", val url: String = "", val size: Long = 0)
+
+/** Un comentariu la o postare; can_delete = il poate sterge utilizatorul curent. */
+data class Comment(
+    val id: String = "",
+    val post_id: String = "",
+    val user_id: String = "",
+    val author: String = "",
+    val text: String = "",
+    val created_at: String = "",
+    val can_delete: Boolean = false
+)
+
 /** Statisticile pentru ecranul de moderare (GET /stats, doar ADMIN). */
 data class ServerStats(val users: UserStats, val posts: PostStats) {
     data class UserStats(val total: Int, val active: Int, val blocked: Int, val admins: Int)
@@ -44,6 +58,27 @@ interface PostService {
     // create offline si pentru cele editate; 409 = conflict, 410 = stearsa pe server
     @PUT("/post/{id}")
     suspend fun update(@Path("id") itemId: String, @Body item: Post): Post
+
+    /** Poza se urca separat, inaintea postarii (corpul = fisierul JPEG). */
+    @PUT("/photos/{id}")
+    suspend fun uploadPhoto(@Path("id") photoId: String, @Body photo: okhttp3.RequestBody): PhotoUpload
+
+    // ---------- aprecieri si comentarii (doar online) ----------
+
+    @PUT("/post/{id}/like")
+    suspend fun like(@Path("id") postId: String): Post
+
+    @DELETE("/post/{id}/like")
+    suspend fun unlike(@Path("id") postId: String): Post
+
+    @GET("/post/{id}/comments")
+    suspend fun comments(@Path("id") postId: String): List<Comment>
+
+    @POST("/post/{id}/comments")
+    suspend fun addComment(@Path("id") postId: String, @Body body: Map<String, String>): Comment
+
+    @DELETE("/comments/{id}")
+    suspend fun deleteComment(@Path("id") commentId: String): retrofit2.Response<Unit>
 
     // 204 fara continut
     @DELETE("/post/{id}")

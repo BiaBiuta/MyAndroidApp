@@ -164,6 +164,20 @@ class PostsViewModel(
         if (me == null) 0 else posts.count { it.user_id == me && it.status == PostStatus.DRAFT }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, 0)
 
+    /** Apreciaza / retrage aprecierea (doar online: schimba ce vad toti). */
+    fun toggleLike(post: Post) {
+        viewModelScope.launch {
+            try {
+                postRepository.setLiked(post.id, !post.liked_by_me)
+            } catch (e: Exception) {
+                Log.w(TAG, "like failed", e)
+                message = if (e is com.example.myandroidapp.core.data.remote.OfflineException)
+                    "Aprecierile au nevoie de conexiune la server."
+                else e.toUserMessage("Aprecierea nu a putut fi salvată.")
+            }
+        }
+    }
+
     /** Publica o ciorna proprie direct din lista (si offline). */
     fun publishDraft(post: Post) {
         viewModelScope.launch {

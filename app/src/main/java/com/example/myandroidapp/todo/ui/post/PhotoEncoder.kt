@@ -23,6 +23,40 @@ object PhotoEncoder {
     private const val MAX_BYTES = 350 * 1024
     private const val TAG = "PhotoEncoder"
 
+    /** Pozele noi: fisiere JPEG in memoria interna a aplicatiei (nu in baza de date). */
+    private const val FILE_MAX_BYTES = 900 * 1024
+
+    /**
+     * Salveaza poza aleasa (galerie / camera) ca fisier JPEG micsorat in filesDir/photos/<uuid>.jpg.
+     * Intoarce calea fisierului (folosita ca Post.photoPath), sau null daca poza nu poate fi citita.
+     * Numele fisierului (UUID) e si id-ul pozei pe server: reincercarea upload-ului nu o dubleaza.
+     */
+    fun saveToFile(context: android.content.Context, uri: Uri): String? = try {
+        val bitmap = decodeScaled(context.contentResolver, uri)
+        if (bitmap == null) {
+            null
+        } else {
+            val bytes = compress(bitmap, FILE_MAX_BYTES)
+            bitmap.recycle()
+            val dir = java.io.File(context.filesDir, "photos").apply { mkdirs() }
+            val file = java.io.File(dir, "${java.util.UUID.randomUUID()}.jpg")
+            file.writeBytes(bytes)
+            Log.d(TAG, "poza salvata: ${file.name}, ${bytes.size / 1024} KB")
+            file.absolutePath
+        }
+    } catch (e: Exception) {
+        Log.w(TAG, "poza nu a putut fi salvata", e)
+        null
+    }
+
+    /** Fisier -> Base64 (postarile private raman criptate in baza de date, nu ca fisiere). */
+    fun fileToBase64(path: String): String? = try {
+        "data:image/jpeg;base64," + Base64.encodeToString(java.io.File(path).readBytes(), Base64.NO_WRAP)
+    } catch (e: Exception) {
+        Log.w(TAG, "poza nu a putut fi citita", e)
+        null
+    }
+
     /** Base64 cu prefixul "data:image/jpeg;base64,", sau null daca poza nu poate fi citita. */
     fun encode(contentResolver: ContentResolver, uri: Uri): String? = try {
         val bitmap = decodeScaled(contentResolver, uri)
@@ -70,12 +104,12 @@ object PhotoEncoder {
     }
 
     /** JPEG din ce in ce mai comprimat, pana incape in [MAX_BYTES]. */
-    private fun compress(bitmap: Bitmap): ByteArray {
+    private fun compress(bitmap: Bitmap, maxBytes: Int = MAX_BYTES): ByteArray {
         var quality = 85
         while (true) {
             val output = ByteArrayOutputStream()
             bitmap.compress(Bitmap.CompressFormat.JPEG, quality, output)
-            if (output.size() <= MAX_BYTES || quality <= 40) return output.toByteArray()
+            if (output.size() <= maxBytes || quality <= 40) return output.toByteArray()
             quality -= 10
         }
     }

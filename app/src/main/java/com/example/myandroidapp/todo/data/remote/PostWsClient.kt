@@ -158,17 +158,17 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
             else -> Location()
         }
 
-        val post = Post(
+        // toate campurile postarii (titlu, rating, data vizitei, loc, stare, poza, aprecieri...),
+        // cu acelasi Gson ca raspunsurile REST; inainte se pierdeau campurile noi la fiecare eveniment
+        val parsed = try {
+            com.example.myandroidapp.core.data.remote.Api.gson.fromJson(p.toString(), Post::class.java)
+        } catch (e: Exception) {
+            Log.w(TAG, "eveniment cu postare invalida", e)
+            null
+        } ?: return null
+        val post = parsed.copy(
             id = id,
-            photo = p.optString("photo"),
-            description = p.optString("description"),
             user_id = p.opt("user_id")?.toString().orEmpty(),
-            user_profile_photo = p.optString("user_profile_photo"),
-            user_last_name = p.optString("user_last_name"),
-            user_first_name = p.optString("user_first_name"),
-            professional = p.optBoolean("professional", false),
-            created_at = p.optString("created_at"),
-            updated_at = p.optString("updated_at"),
             isNotSaved = false,
             location = location,
             isPrivate = false

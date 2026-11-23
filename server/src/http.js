@@ -18,7 +18,7 @@ class Router {
     this.routes = [];
   }
 
-  add(method, pattern, handler, { auth = false } = {}) {
+  add(method, pattern, handler, { auth = false, raw = false } = {}) {
     const keys = [];
     const regex = new RegExp(
       '^' +
@@ -28,7 +28,8 @@ class Router {
         }) +
         '/?$',
     );
-    this.routes.push({ method, regex, keys, handler, auth });
+    // raw = corpul NU e JSON (ex. o poza); handler-ul il citeste cu readRawBody
+    this.routes.push({ method, regex, keys, handler, auth, raw });
   }
 
   match(method, pathname) {
@@ -44,6 +45,37 @@ class Router {
     }
     return { route: null, pathMatched };
   }
+}
+
+/** Citeste corpul cererii ca octeti (ex. o poza JPEG), cu limita de marime. */
+function readRawBody(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const tooBig = () => new ApiError(413, 'Poza este prea mare. Alegeți o poză mai mică.');
+    // marimea declarata: refuzam imediat, dar citim (si aruncam) restul, ca raspunsul 413 sa ajunga
+    if (Number(req.headers['content-length']) > maxBytes) {
+      req.resume();
+      reject(tooBig());
+      return;
+    }
+    const chunks = [];
+    let size = 0;
+    let rejected = false;
+    req.on('data', (chunk) => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > maxBytes) {
+        rejected = true;
+        chunks.length = 0;
+        reject(tooBig());
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on('end', () => {
+      if (!rejected) resolve(Buffer.concat(chunks));
+    });
+    req.on('error', reject);
+  });
 }
 
 /** Citeste corpul JSON al cererii, cu limita de marime. */
@@ -97,4 +129,5 @@ function bearerToken(req) {
   return match ? match[1].trim() : null;
 }
 
-module.exports = { ApiError, Router, readJsonBody, sendJson, bearerToken };
+module.exports = {
+  readRawBody, ApiError, Router, readJsonBody, sendJson, bearerToken };

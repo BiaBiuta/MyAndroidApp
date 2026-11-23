@@ -59,6 +59,8 @@ class AppContainer(val context: Context) {
             currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
             ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
             ensureServerSession = { upgradeOfflineSession() },
+            onNewPostFromOthers = { postNotifications.newPostFromOthers(it) },
+            onOfflinePostsSynced = { postNotifications.offlinePostsSynced(it) },
             scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
         )
     }
@@ -97,6 +99,8 @@ class AppContainer(val context: Context) {
         postRepository.setToken(upgraded.token)
         return true
     }
+
+    val postNotifications by lazy { com.example.myandroidapp.notifications.PostNotifications(context) }
 
     val authRepository: AuthRepository by lazy {
         AuthRepository(authDataSource, roleRepository)

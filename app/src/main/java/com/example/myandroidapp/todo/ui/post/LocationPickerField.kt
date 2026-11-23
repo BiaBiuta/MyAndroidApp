@@ -107,7 +107,9 @@ fun LocationPickerField(
             busy = true
             info = null
             results = PlaceSearch.search(context, query)
-            if (results.isEmpty()) info = "Nu am găsit locul. Verifică internetul sau încearcă alt nume."
+            if (results.isEmpty()) {
+                info = PlaceSearch.lastProblem ?: "Nu am găsit „${query.trim()}”. Încearcă alt nume (ex. orașul sau județul)."
+            }
             busy = false
         }
     }

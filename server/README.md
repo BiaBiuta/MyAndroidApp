@@ -46,9 +46,23 @@ Teste: `npm test` rulează 13 teste end-to-end (autentificare, token, CRUD, perm
 
 Erorile au forma `{"message": "…"}`, cu mesajul în română, pe înțelesul utilizatorului.
 
+## Poze, aprecieri, comentarii, profil
+
+| Metodă | Cale | Autentificare | Descriere |
+|---|---|---|---|
+| PUT | `/photos/:id` | USER | Urcă poza unei postări (corpul = JPEG / PNG / WebP, max. 3 MB; conținutul e verificat). `id` = UUID generat pe telefon, deci reîncercarea nu dublează poza. Răspuns: `{id, url: "/photos/<id>"}` |
+| GET | `/photos/:id` | ✓ | Poza (doar autorul ei sau cine poate vedea o postare care o folosește; poza unei ciorne nu e publică) |
+| PUT / DELETE | `/post/:id/like` | USER | Apreciază / retrage aprecierea (idempotent) |
+| GET | `/post/:id/comments` | ✓ | Comentariile, cu `can_delete` pentru utilizatorul curent |
+| POST | `/post/:id/comments` | USER | Comentariu nou `{text}` (1–500 caractere) |
+| DELETE | `/comments/:id` | ✓ | Autorul comentariului, autorul postării sau un admin |
+| POST | `/me/password` | ✓ (cont cu parolă) | `{currentPassword, newPassword}`; parola nouă respectă aceleași reguli ca la înregistrare |
+
+Fiecare postare primită de un utilizator are și `like_count`, `liked_by_me` (calculat pentru el) și `comment_count`; WebSocket-ul trimite fiecăruia varianta lui. Postarea stocată are doar `photo_url` (adresa pozei); poza în sine e un fișier în `data/photos/`.
+
 ## Câmpurile unei postări
 
-`id`, `title` (≤120), `place` (numele locului, ≤160), `description` (≤2000), `photo` (Base64, ≤1.000.000 caractere, altfel 413), `rating` (0–5),
+`id`, `title` (≤120), `photo_url` (`/photos/<id>`, poza urcată de autor), `place` (numele locului, ≤160), `description` (≤2000), `photo` (Base64, ≤1.000.000 caractere, altfel 413), `rating` (0–5),
 `visit_date` (ms), `status` (`ACTIVE` / `DRAFT`), `hidden`, `location`, `user_id`, `created_at`, `updated_at`.
 WebSocket-ul trimite fiecărui client doar ce are voie să vadă (ciorna altcuiva ajunge ca `deleted`).
 

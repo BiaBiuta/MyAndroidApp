@@ -1,5 +1,11 @@
 package com.example.myandroidapp.todo.ui.detail
 
+import androidx.compose.material.icons.automirrored.filled.Send
+import androidx.compose.material.icons.filled.Delete
+import com.example.myandroidapp.auth.data.local.isRegularUser
+import com.example.myandroidapp.core.data.remote.toUserMessage
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.net.Uri
@@ -79,7 +85,13 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 /** Postarea deschisa + daca utilizatorul curent e autorul (poate edita / publica). */
-data class PostDetailState(val post: Post? = null, val isMine: Boolean = false, val loaded: Boolean = false)
+data class PostDetailState(
+    val post: Post? = null,
+    val isMine: Boolean = false,
+    val loaded: Boolean = false,
+    // poate aprecia / comenta: cont USER propriu (nu admin, nu vizitator anonim)
+    val canInteract: Boolean = false
+)
 
 class PostDetailViewModel(
     private val postRepository: PostRepository,
@@ -95,15 +107,104 @@ class PostDetailViewModel(
             PostDetailState(
                 post = post,
                 isMine = post != null && user != null && !user.isBlocked && post.user_id == user.ownerKey,
-                loaded = true
+                loaded = true,
+                canInteract = user != null && user.isRegularUser && !user.isBlocked
             )
         }.stateIn(viewModelScope, SharingStarted.Eagerly, PostDetailState())
 
     var message by mutableStateOf<String?>(null)
         private set
 
+    // ---------- comentarii (de pe server; offline: mesaj, fara lista) ----------
+    var comments by mutableStateOf<List<com.example.myandroidapp.todo.data.remote.Comment>>(emptyList())
+        private set
+    var commentsError by mutableStateOf<String?>(null)
+        private set
+    var commentsLoading by mutableStateOf(false)
+        private set
+    var commentDraft by mutableStateOf("")
+        private set
+    var sending by mutableStateOf(false)
+        private set
+
+    init {
+        // comentariile se reincarca la deschidere si cand se schimba numarul lor (WebSocket)
+        viewModelScope.launch {
+            state.map { it.post?.id to it.post?.comment_count }
+                .distinctUntilChanged()
+                .collect { (id, _) -> if (id != null) loadComments(id) }
+        }
+    }
+
     fun load(id: String) {
         postId.value = id
+    }
+
+    private suspend fun loadComments(id: String) {
+        val post = state.value.post ?: return
+        if (post.status != PostStatus.ACTIVE) {
+            comments = emptyList()
+            return
+        }
+        commentsLoading = true
+        try {
+            comments = postRepository.comments(id)
+            commentsError = null
+        } catch (e: Exception) {
+            commentsError = if (e is com.example.myandroidapp.core.data.remote.OfflineException)
+                "Comentariile se văd doar cu conexiune la server."
+            else e.toUserMessage("Comentariile nu au putut fi încărcate.")
+        }
+        commentsLoading = false
+    }
+
+    fun onCommentChange(value: String) {
+        if (value.length <= 500) commentDraft = value
+    }
+
+    fun sendComment() {
+        val post = state.value.post ?: return
+        val text = commentDraft.trim()
+        if (text.isEmpty() || !state.value.canInteract) return
+        viewModelScope.launch {
+            sending = true
+            try {
+                postRepository.addComment(post.id, text)
+                commentDraft = ""
+                loadComments(post.id)
+            } catch (e: Exception) {
+                message = if (e is com.example.myandroidapp.core.data.remote.OfflineException)
+                    "Comentariile au nevoie de conexiune la server."
+                else e.toUserMessage("Comentariul nu a putut fi trimis.")
+            }
+            sending = false
+        }
+    }
+
+    fun deleteComment(comment: com.example.myandroidapp.todo.data.remote.Comment) {
+        val post = state.value.post ?: return
+        viewModelScope.launch {
+            try {
+                postRepository.deleteComment(comment.id)
+                loadComments(post.id)
+            } catch (e: Exception) {
+                message = e.toUserMessage("Comentariul nu a putut fi șters.")
+            }
+        }
+    }
+
+    fun toggleLike() {
+        val post = state.value.post ?: return
+        if (!state.value.canInteract) return
+        viewModelScope.launch {
+            try {
+                postRepository.setLiked(post.id, !post.liked_by_me)
+            } catch (e: Exception) {
+                message = if (e is com.example.myandroidapp.core.data.remote.OfflineException)
+                    "Aprecierile au nevoie de conexiune la server."
+                else e.toUserMessage("Aprecierea nu a putut fi salvată.")
+            }
+        }
     }
 
     fun consumeMessage() {
@@ -189,8 +290,8 @@ fun PostDetailScreen(postId: String, onBack: () -> Unit, onEdit: (id: String) ->
                 .fillMaxSize()
                 .verticalScroll(rememberScrollState())
         ) {
-            if (post.photo.isNotBlank()) {
-                PostPhoto(photo = post.photo, height = 280.dp, rounded = false)
+            if (post.displayPhoto.isNotBlank()) {
+                PostPhoto(photo = post.displayPhoto, height = 280.dp, rounded = false)
             }
             Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 if (post.title.isNotBlank()) {
@@ -235,6 +336,12 @@ fun PostDetailScreen(postId: String, onBack: () -> Unit, onEdit: (id: String) ->
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
+                if (post.status == PostStatus.ACTIVE) {
+                    com.example.myandroidapp.todo.ui.posts.SocialRow(
+                        post = post,
+                        onToggleLike = if (state.canInteract) viewModel::toggleLike else null
+                    )
+                }
 
                 if (post.location.isSet) {
                     Spacer(Modifier.height(4.dp))
@@ -255,6 +362,10 @@ fun PostDetailScreen(postId: String, onBack: () -> Unit, onEdit: (id: String) ->
                         Spacer(Modifier.width(8.dp))
                         Text("Deschide în aplicația de hărți")
                     }
+                }
+
+                if (post.status == PostStatus.ACTIVE) {
+                    CommentsSection(viewModel, canComment = state.canInteract)
                 }
             }
         }
@@ -284,5 +395,67 @@ private fun openInMaps(context: android.content.Context, post: Post) {
             )
         } catch (ignored: ActivityNotFoundException) {
         }
+    }
+}
+
+/** Comentariile postarii: lista, campul de scris si stergerea (autor / autorul postarii / admin). */
+@Composable
+private fun CommentsSection(viewModel: PostDetailViewModel, canComment: Boolean) {
+    HorizontalDivider()
+    Text(
+        "Comentarii (${viewModel.comments.size})",
+        style = MaterialTheme.typography.titleMedium
+    )
+    if (viewModel.commentsLoading && viewModel.comments.isEmpty()) {
+        androidx.compose.material3.LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+    }
+    viewModel.commentsError?.let {
+        Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+    if (viewModel.comments.isEmpty() && viewModel.commentsError == null && !viewModel.commentsLoading) {
+        Text(
+            if (canComment) "Niciun comentariu încă. Scrie primul!" else "Niciun comentariu încă.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+    }
+    viewModel.comments.forEach { comment ->
+        Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    "${comment.author} · ${formatPostDate(comment.created_at)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(comment.text, style = MaterialTheme.typography.bodyMedium)
+            }
+            if (comment.can_delete) {
+                IconButton(onClick = { viewModel.deleteComment(comment) }) {
+                    Icon(
+                        androidx.compose.material.icons.Icons.Default.Delete,
+                        contentDescription = "Șterge comentariul",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+    if (canComment) {
+        androidx.compose.material3.OutlinedTextField(
+            value = viewModel.commentDraft,
+            onValueChange = viewModel::onCommentChange,
+            label = { Text("Scrie un comentariu") },
+            enabled = !viewModel.sending,
+            supportingText = { Text("${viewModel.commentDraft.length}/500") },
+            trailingIcon = {
+                IconButton(
+                    onClick = viewModel::sendComment,
+                    enabled = !viewModel.sending && viewModel.commentDraft.isNotBlank()
+                ) {
+                    Icon(androidx.compose.material.icons.Icons.AutoMirrored.Filled.Send, contentDescription = "Trimite comentariul")
+                }
+            },
+            modifier = Modifier.fillMaxWidth()
+        )
     }
 }

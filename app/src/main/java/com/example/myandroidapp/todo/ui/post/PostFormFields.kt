@@ -55,18 +55,20 @@ import java.util.Date
 fun PhotoPickerField(
     photo: String,
     enabled: Boolean,
-    onPhotoPicked: (base64: String?) -> Unit
+    // calea fisierului salvat (null = poza nu a putut fi citita)
+    onPhotoPicked: (photo: String?) -> Unit
 ) {
     val context = LocalContext.current
     // uri-ul fisierului in care camera scrie poza (supravietuieste rotirii ecranului)
     var cameraUri by rememberSaveable { mutableStateOf<String?>(null) }
 
     val pickFromGallery = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) onPhotoPicked(PhotoEncoder.encode(context.contentResolver, uri))
+        // poza devine un fisier al aplicatiei (calea lui merge mai departe in formular)
+        if (uri != null) onPhotoPicked(PhotoEncoder.saveToFile(context, uri))
     }
     val takePicture = rememberLauncherForActivityResult(ActivityResultContracts.TakePicture()) { saved ->
         val uri = cameraUri?.let(Uri::parse)
-        if (saved && uri != null) onPhotoPicked(PhotoEncoder.encode(context.contentResolver, uri))
+        if (saved && uri != null) onPhotoPicked(PhotoEncoder.saveToFile(context, uri))
     }
     fun launchCamera() {
         val uri = newCameraUri(context)

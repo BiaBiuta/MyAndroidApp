@@ -1,5 +1,7 @@
 package com.example.myapplication.todo.ui.items
 
+import androidx.compose.material.icons.filled.AccountCircle
+import androidx.compose.material.icons.filled.Map
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.material.icons.filled.Clear
@@ -82,6 +84,9 @@ fun PostsScreen(
     onOpenMyReports: () -> Unit = {},
     // doar USER: trackerele IoT asociate
     onOpenDevices: () -> Unit = {},
+    // harta cu toate postarile si profilul (statistici, parola, deconectare)
+    onOpenMap: () -> Unit = {},
+    onOpenProfile: () -> Unit = {},
     // doar autorul: editarea postarii proprii
     onEditPost: (id: String) -> Unit = {},
     // comutatorul de amprenta: vizibil doar pentru sesiunile salvate (login cu e-mail si parola)
@@ -107,6 +112,21 @@ fun PostsScreen(
     var postToReport by remember { mutableStateOf<Post?>(null) }
     var postToDelete by remember { mutableStateOf<Post?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
+
+    // Notificarile (postari noi ale altora, sincronizare reusita): pe Android 13+ trebuie permisiune.
+    // O cerem o singura data, cand utilizatorul ajunge in lista de postari.
+    val notificationPermission = androidx.activity.compose.rememberLauncherForActivityResult(
+        androidx.activity.result.contract.ActivityResultContracts.RequestPermission()
+    ) { }
+    val context = androidx.compose.ui.platform.LocalContext.current
+    LaunchedEffect(Unit) {
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.TIRAMISU &&
+            androidx.core.content.ContextCompat.checkSelfPermission(context, android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            notificationPermission.launch(android.Manifest.permission.POST_NOTIFICATIONS)
+        }
+    }
 
     // Confirmari / erori ale actiunilor pe rol (stergere, raportare)
     LaunchedEffect(itemsViewModel.message) {
@@ -180,8 +200,12 @@ fun PostsScreen(
                             Icon(Icons.Default.Lock, contentDescription = "Postări private")
                         }
                     }
-                    IconButton(onClick = onLogout) {
-                        Icon(Icons.AutoMirrored.Filled.Logout, contentDescription = "Deconectare")
+                    IconButton(onClick = onOpenMap) {
+                        Icon(Icons.Default.Map, contentDescription = "Harta postărilor")
+                    }
+                    // profilul: statistici, schimbarea parolei si deconectarea
+                    IconButton(onClick = onOpenProfile) {
+                        Icon(Icons.Default.AccountCircle, contentDescription = "Profil și deconectare")
                     }
                 }
             )
@@ -257,6 +281,8 @@ fun PostsScreen(
             PostList(
                 posts = itemsUiState,
                 isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
+                // doar conturile USER apreciaza (nu adminul, nu vizitatorul anonim)
+                onToggleLike = if (currentUser?.isRegularUser == true) itemsViewModel::toggleLike else null,
                 emptyText = when {
                     filters.draftsOnly -> "Nu ai ciorne. Când salvezi o postare ca ciornă, o găsești aici."
                     noFilters -> "Încă nu există postări. Fii primul care adaugă una!"
@@ -486,7 +512,7 @@ private fun ServerOutdatedBanner() {
             .semantics { liveRegion = LiveRegionMode.Polite }
     ) {
         Text(
-            "Serverul pornit este o versiune veche: titlul, rating-ul, ciornele și locul nu se salvează pe server. " +
+            "Serverul pornit este o versiune veche: pozele, aprecierile, comentariile sau ciornele nu funcționează. " +
                     "Oprește-l și pornește-l din folderul server/ al proiectului (npm start).",
             style = androidx.compose.material3.MaterialTheme.typography.bodySmall,
             modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)

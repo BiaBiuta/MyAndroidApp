@@ -51,6 +51,8 @@ val myReportsRoute = "my-reports"
 val editPostRoute = "posts/edit"
 val postDetailRoute = "posts/detail"
 val devicesRoute = "devices"
+val mapRoute = "map"
+val profileRoute = "profile"
 val postFromVisitRoute = "posts-new-visit"
 
 @RequiresApi(Build.VERSION_CODES.O)
@@ -115,6 +117,8 @@ fun MyAppNavHost() {
                 onOpenAdmin = { navController.navigate(adminRoute) },
                 onOpenMyReports = { navController.navigate(myReportsRoute) },
                 onOpenDevices = { navController.navigate(devicesRoute) },
+                onOpenMap = { navController.navigate(mapRoute) },
+                onOpenProfile = { navController.navigate(profileRoute) },
                 onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
                 // vizitatorul anonim nu are ce debloca cu amprenta
                 showBiometricToggle = sessionState is SessionState.Active && currentUser?.isGuest != true,
@@ -160,6 +164,24 @@ fun MyAppNavHost() {
                 onClose = { message ->
                     message?.let { Toast.makeText(context, it, Toast.LENGTH_SHORT).show() }
                     navController.popBackStack()
+                }
+            )
+        }
+        // Harta tuturor postarilor (OpenStreetMap); atingerea unui marcaj deschide postarea
+        composable(route = mapRoute) {
+            com.example.myandroidapp.maps.PostsMapScreen(
+                onBack = { navController.popBackStack() },
+                onOpenPost = { id -> navController.navigate("$postDetailRoute/${Uri.encode(id)}") }
+            )
+        }
+        // Profilul: statisticile jurnalului, schimbarea parolei, deconectarea
+        composable(route = profileRoute) {
+            com.example.myandroidapp.profile.ProfileScreen(
+                onBack = { navController.popBackStack() },
+                onLogout = {
+                    myAppViewModel.logout {
+                        navController.navigate(authRoute) { popUpTo(0) }
+                    }
                 }
             )
         }

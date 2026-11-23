@@ -61,9 +61,9 @@ class PostViewModel(
         if (value.length <= MAX_DESCRIPTION) state = state.copy(description = value, error = null)
     }
 
-    fun onPhotoPicked(base64: String?) {
-        state = if (base64 == null) state.copy(error = "Poza nu a putut fi citită. Încercați alta.")
-        else state.copy(photo = base64, error = null)
+    fun onPhotoPicked(photo: String?) {
+        state = if (photo == null) state.copy(error = "Poza nu a putut fi citită. Încercați alta.")
+        else state.copy(photo = photo, error = null)
     }
 
     fun onRatingChange(value: Int) {
@@ -127,7 +127,6 @@ class PostViewModel(
                 val post = Post(
                     title = title,
                     description = description,
-                    photo = form.photo,
                     rating = form.rating,
                     visit_date = form.visitDate,
                     status = if (form.isDraft) PostStatus.DRAFT else PostStatus.ACTIVE,
@@ -137,7 +136,7 @@ class PostViewModel(
                     user_id = user.ownerKey,
                     user_first_name = user.email.substringBefore("@"),
                     created_at = com.example.myandroidapp.core.isoNow()
-                )
+                ).withPhoto(form.photo) // fisierul pozei: se urca pe server inaintea postarii
                 val message = if (form.isPrivate) {
                     postRepository.savePrivate(post.copy(isPrivate = true))
                     "Postarea a fost salvată în secțiunea privată."

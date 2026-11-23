@@ -31,9 +31,10 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 10: postari cu titlu, rating, data vizitei, ciorna, ascundere si stare de sincronizare
 // version 11: numele locului (place)
 // version 12: trackerele asociate (paired_devices), cu cheia de asociere criptata
+// version 13: poza ca fisier (photoPath / photo_url), aprecieri si comentarii (numere de la server)
 @Database(
     entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class, PairedDeviceEntity::class],
-    version = 12
+    version = 13
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
@@ -142,6 +143,17 @@ abstract class MyAppDatabase : RoomDatabase() {
         }
 
         // 10 -> 11: numele locului (harta OpenStreetMap in loc de Google Maps)
+        // 12 -> 13: poza ca fisier local + adresa ei pe server; aprecieri si comentarii
+        private val MIGRATION_12_13 = object : Migration(12, 13) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `photoPath` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `photo_url` TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `like_count` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `liked_by_me` INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `comment_count` INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         // 11 -> 12: trackerele IoT asociate (cheia de asociere e criptata cu Keystore inainte de salvare)
         private val MIGRATION_11_12 = object : Migration(11, 12) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -179,7 +191,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
                     .fallbackToDestructiveMigration()
                     .addCallback(REPAIR_OVERSIZED_PHOTOS)
                     .build()

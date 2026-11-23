@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.data
 
+import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.RequestBody.Companion.asRequestBody
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
@@ -72,6 +74,9 @@ class PostRepository(
     private val ownerKeys: Flow<String> = flowOf(""),
     // sesiune facuta offline (token "local-"): incearca login-ul pe server cand acesta revine
     private val ensureServerSession: suspend () -> Boolean = { false },
+    // notificari: postare noua de la altcineva / postari offline ajunse pe server
+    private val onNewPostFromOthers: (Post) -> Unit = {},
+    private val onOfflinePostsSynced: (Int) -> Unit = {},
     // programeaza sincronizarea cand revine reteaua (WorkManager), pentru ce a ramas in coada
     private val scheduleSync: () -> Unit = {}
 ) {
@@ -306,7 +311,10 @@ class PostRepository(
                 deleteOnServer(local.id)
                 itemDao.deleteById(local.id)
             } else {
-                val saved = apiCall { postService.update(itemId = local.id, item = local) }
+                // intai poza (fisier separat), apoi postarea cu adresa ei: serverul nu primeste
+                // niciodata o postare fara poza ei
+                val ready = uploadPhotoIfNeeded(local)
+                val saved = apiCall { postService.update(itemId = ready.id, item = ready) }
                 storeFromServer(saved, overwriteLocalChanges = true)
             }
             WriteResult.Sent
@@ -382,7 +390,17 @@ class PostRepository(
 
     /** Postare privata: se salveaza doar local si CRIPTAT, nu ajunge niciodata pe server. */
     suspend fun savePrivate(post: Post): Post {
-        val privatePost = post.copy(
+        // poza ca fisier -> criptata in baza de date, ca restul postarii private; fisierul se sterge
+        val withPhoto = withContext(Dispatchers.IO) {
+            val path = post.photoPath
+            if (path.isBlank()) post
+            else {
+                val inline = com.example.myandroidapp.todo.ui.post.PhotoEncoder.fileToBase64(path).orEmpty()
+                runCatching { java.io.File(path).delete() }
+                post.copy(photo = inline.ifBlank { post.photo }, photoPath = "", photo_url = "")
+            }
+        }
+        val privatePost = withPhoto.copy(
             id = post.id.ifEmpty { "private-" + java.util.UUID.randomUUID().toString() },
             isPrivate = true,
             isNotSaved = false
@@ -523,6 +541,47 @@ class PostRepository(
             onFailure = { close() })
         awaitClose { postWsClient.closeSocket(socket) }
     }
+    /**
+     * Urca poza postarii daca e doar pe telefon. Id-ul pozei = numele fisierului (UUID), deci o
+     * reincercare dupa o conexiune cazuta nu o dubleaza. Adresa primita se salveaza imediat local.
+     */
+    private suspend fun uploadPhotoIfNeeded(post: Post): Post {
+        if (post.photoPath.isBlank() || post.photo_url.isNotBlank()) return post
+        val file = java.io.File(post.photoPath)
+        if (!file.exists()) {
+            // fisierul a disparut (ex. date sterse): postarea pleaca fara poza, nu ramane blocata
+            return post.copy(photoPath = "").also { itemDao.insert(it) }
+        }
+        val photoId = file.nameWithoutExtension
+        val body = file.asRequestBody("image/jpeg".toMediaType())
+        val uploaded = apiCall { postService.uploadPhoto(photoId, body) }
+        val withUrl = post.copy(photo_url = uploaded.url)
+        itemDao.insert(withUrl)
+        return withUrl
+    }
+
+    // ---------- aprecieri si comentarii: schimba ce vad toti, deci doar online ----------
+
+    /** Apreciaza / retrage aprecierea; postarea actualizata (numarul) ajunge in cache. */
+    suspend fun setLiked(postId: String, liked: Boolean): Post {
+        val updated = apiCall { if (liked) postService.like(postId) else postService.unlike(postId) }
+        storeFromServer(updated, overwriteLocalChanges = false)
+        return updated
+    }
+
+    suspend fun comments(postId: String): List<com.example.myandroidapp.todo.data.remote.Comment> =
+        apiCall { postService.comments(postId) }
+
+    suspend fun addComment(postId: String, text: String): com.example.myandroidapp.todo.data.remote.Comment =
+        apiCall { postService.addComment(postId, mapOf("text" to text)) }
+
+    suspend fun deleteComment(commentId: String) {
+        val response = apiCall { postService.deleteComment(commentId) }
+        if (!response.isSuccessful && response.code() != 404) {
+            throw com.example.myandroidapp.core.data.remote.ServerException(response.code(), "Comentariul nu a putut fi șters.")
+        }
+    }
+
     /** Postarea, cum a confirmat-o serverul: "Synced". */
     private fun Post.asSynced(): Post =
         copy(isPrivate = false, isNotSaved = false, syncStatus = SyncStatus.SYNCED, syncError = "", isDeleted = false)
@@ -533,9 +592,12 @@ class PostRepository(
      * utilizatorului, care pleaca la sincronizare (si castiga daca e mai noua).
      */
     private suspend fun storeFromServer(post: Post, overwriteLocalChanges: Boolean) {
-        if (!overwriteLocalChanges && itemDao.findById(post.id)?.isNotSaved == true) return
+        val local = itemDao.findById(post.id)
+        if (!overwriteLocalChanges && local?.isNotSaved == true) return
+        // poza facuta pe acest telefon ramane afisata din fisier (fara descarcare), daca e aceeasi
+        val keepFile = local?.photoPath?.takeIf { it.isNotBlank() && local.photo_url == post.photo_url }.orEmpty()
         // scriem in baza locala -> listele (Flow din Room) se actualizeaza singure
-        itemDao.insert(post.asSynced().safeForCache())
+        itemDao.insert(post.asSynced().copy(photoPath = keepFile).safeForCache())
     }
 
     /**
@@ -594,12 +656,17 @@ class PostRepository(
         val ownerKey = currentOwnerKey()
         val pending = itemDao.getUnsyncedItems().filter { it.user_id == ownerKey }
         Log.d(TAG, "syncUnsynced: ${pending.size}")
+        var published = 0
         for (post in pending) {
-            if (push(post.id) == WriteResult.Queued) {
+            val result = push(post.id)
+            if (result == WriteResult.Sent && !post.isDeleted) published++
+            if (result == WriteResult.Queued) {
                 Log.d(TAG, "syncUnsynced: server indisponibil, reincercam mai tarziu")
+                onOfflinePostsSynced(published)
                 return@withLock false
             }
         }
+        onOfflinePostsSynced(published)
         true
     }
 
@@ -613,6 +680,11 @@ class PostRepository(
 
     private suspend fun handleItemCreated(post: Post) {
         Log.d(TAG, "handleItemCreated...")
+        // postare noua de la ALTCINEVA (nu o copie a uneia pe care o avem deja) -> notificare
+        val known = itemDao.findById(post.id) != null
+        if (!known && post.user_id != currentOwnerKey() && post.status != PostStatus.DRAFT) {
+            onNewPostFromOthers(post)
+        }
         //Log.d(TAG,post.toString())
 //        posts = listOf(post) + posts
 //        //Log.d(posts.toString(),"posts")
@@ -646,7 +718,7 @@ class PostRepository(
 //    }
 }
 /** Versiunea minima a serverului din repo (server/, GET /health) cu care merge aplicatia. */
-private const val REQUIRED_SERVER_VERSION = 4
+private const val REQUIRED_SERVER_VERSION = 5
 
 /** Cat de des reincearca aplicatia deschisa sa trimita postarile din coada. */
 private const val FOREGROUND_RETRY_MS = 10_000L
