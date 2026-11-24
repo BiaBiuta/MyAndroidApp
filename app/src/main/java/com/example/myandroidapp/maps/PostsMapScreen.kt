@@ -28,7 +28,6 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,13 +37,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,13 +60,12 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.stateIn
-import org.osmdroid.tileprovider.tilesource.TileSourceFactory
-import org.osmdroid.util.BoundingBox
-import org.osmdroid.util.GeoPoint
-import org.osmdroid.views.CustomZoomButtonsController
-import org.osmdroid.views.MapView
-import org.osmdroid.views.overlay.CopyrightOverlay
-import org.osmdroid.views.overlay.Marker
+import org.maplibre.android.annotations.MarkerOptions
+import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
+import org.maplibre.android.geometry.LatLng
+import org.maplibre.android.geometry.LatLngBounds
+import org.maplibre.android.maps.MapLibreMap
 
 /** Postarile cu loc, pentru harta: toate cele vizibile sau doar ale utilizatorului. */
 data class MapPosts(val all: List<Post> = emptyList(), val mine: List<Post> = emptyList())
@@ -210,69 +204,49 @@ private fun SelectedPostCard(post: Post, onOpen: () -> Unit, onClose: () -> Unit
     }
 }
 
-/** Harta osmdroid cu un marcaj pentru fiecare postare; se incadreaza pe toate marcajele. */
+/** Harta (MapLibre + OpenFreeMap) cu un marcaj pentru fiecare postare; se incadreaza pe toate. */
 @Composable
 private fun PostsMap(posts: List<Post>, onSelect: (Post) -> Unit, modifier: Modifier = Modifier) {
-    val context = LocalContext.current
     val currentOnSelect by rememberUpdatedState(onSelect)
-    val mapView = remember {
-        OsmConfig.init(context)
-        MapView(context).apply {
-            setTileSource(OsmConfig.tileSource)
-            setMultiTouchControls(true)
-            isTilesScaledToDpi = true
-            zoomController.setVisibility(CustomZoomButtonsController.Visibility.SHOW_AND_FADEOUT)
-            controller.setZoom(6.5)
-            controller.setCenter(GeoPoint(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
-            overlays.add(CopyrightOverlay(context))
+    var map by remember { mutableStateOf<MapLibreMap?>(null) }
+    // marcaj -> postare (pentru atingerea marcajului)
+    val markerPosts = remember { mutableMapOf<Long, Post>() }
+    val mapView = rememberMapLibre { ready ->
+        ready.cameraPosition = CameraPosition.Builder()
+            .target(LatLng(DEFAULT_LATITUDE, DEFAULT_LONGITUDE))
+            .zoom(5.5)
+            .build()
+        ready.setOnMarkerClickListener { marker ->
+            markerPosts[marker.id]?.let(currentOnSelect)
+            true
         }
+        map = ready
     }
     var problem by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(Unit) { problem = OsmConfig.tileProblem() }
 
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner) {
-        val observer = LifecycleEventObserver { _, event ->
-            when (event) {
-                Lifecycle.Event.ON_RESUME -> mapView.onResume()
-                Lifecycle.Event.ON_PAUSE -> mapView.onPause()
-                else -> {}
-            }
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        mapView.onResume()
-        onDispose {
-            lifecycleOwner.lifecycle.removeObserver(observer)
-            mapView.onDetach()
-        }
-    }
-
     // marcajele se refac cand se schimba lista (filtru, postari noi prin WebSocket)
-    LaunchedEffect(posts) {
-        mapView.overlays.removeAll { it is Marker }
+    LaunchedEffect(map, posts) {
+        val ready = map ?: return@LaunchedEffect
+        ready.removeAnnotations()
+        markerPosts.clear()
         posts.forEach { post ->
-            mapView.overlays.add(Marker(mapView).apply {
-                position = GeoPoint(post.location.latitude, post.location.longitude)
-                setAnchor(Marker.ANCHOR_CENTER, Marker.ANCHOR_BOTTOM)
-                title = post.title.ifBlank { post.place }
-                setOnMarkerClickListener { _, _ ->
-                    currentOnSelect(post)
-                    true
-                }
-            })
+            val marker = ready.addMarker(
+                MarkerOptions()
+                    .position(LatLng(post.location.latitude, post.location.longitude))
+                    .title(post.title.ifBlank { post.place })
+            )
+            markerPosts[marker.id] = post
         }
+        val points = posts.map { LatLng(it.location.latitude, it.location.longitude) }
         when {
-            posts.size == 1 -> {
-                mapView.controller.setZoom(12.0)
-                mapView.controller.setCenter(GeoPoint(posts[0].location.latitude, posts[0].location.longitude))
-            }
-            posts.size > 1 -> {
-                val box = BoundingBox.fromGeoPoints(posts.map { GeoPoint(it.location.latitude, it.location.longitude) })
+            points.size == 1 -> ready.animateCamera(CameraUpdateFactory.newLatLngZoom(points[0], 12.0))
+            points.size > 1 -> {
+                val bounds = LatLngBounds.Builder().includes(points).build()
                 // dupa ce harta are dimensiuni (altfel incadrarea nu se poate calcula)
-                mapView.post { mapView.zoomToBoundingBox(box.increaseByScale(1.3f), false) }
+                mapView.post { ready.animateCamera(CameraUpdateFactory.newLatLngBounds(bounds, 120)) }
             }
         }
-        mapView.invalidate()
     }
 
     Box(modifier = modifier) {

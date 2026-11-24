@@ -90,8 +90,8 @@ dependencies {
 
     implementation("com.google.android.gms:play-services-location:21.0.1")
 
-    // Harta: OpenStreetMap (osmdroid) - gratuita, fara cheie API (in locul Google Maps)
-    implementation("org.osmdroid:osmdroid-android:6.1.20")
+    // Harta: MapLibre (open-source) + OpenFreeMap (date OpenStreetMap) - gratuita, fara cheie API
+    implementation("org.maplibre.gl:android-sdk:11.8.2")
 //    implementation(libs.androidx.room.runtime)
 //    implementation(libs.androidx.adapters)
 //    ksp(libs.androidx.room.compiler)
