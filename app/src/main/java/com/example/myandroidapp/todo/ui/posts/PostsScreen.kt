@@ -46,6 +46,9 @@ import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Flag
+import androidx.compose.material.icons.filled.Luggage
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Sensors
 import androidx.compose.material.icons.filled.Person
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.AuthProvider
@@ -70,9 +73,7 @@ import com.example.myapplication.network.MyNetworkStatusViewModel
 import com.ilazar.myanimationsapp.MyFloatingActionButton
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import androidx.compose.material.icons.filled.Luggage
-import androidx.compose.material.icons.filled.PhotoLibrary
-import androidx.compose.material.icons.filled.Sensors
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostsScreen(
@@ -265,9 +266,7 @@ fun PostsScreen(
                     itemsViewModel.loadItems()
                 }
             }
-            if (itemsViewModel.isRefreshing) {
-                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
-            }
+            // indicatorul de actualizare e cel al PullToRefreshBox (si la actualizarea automata)
             // Serverul pornit e o versiune veche: titlul, rating-ul, ciornele si locul s-ar pierde
             if (itemsViewModel.serverOutdated) {
                 ServerOutdatedBanner()
@@ -289,49 +288,56 @@ fun PostsScreen(
                 onSavedOnlyChange = itemsViewModel::onSavedOnlyChange
             )
             val noFilters = filters == PostsViewModel.Filters()
-            PostList(
-                posts = itemsUiState,
-                isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
-                // doar conturile USER apreciaza (nu adminul, nu vizitatorul anonim)
-                onToggleLike = if (currentUser?.isRegularUser == true) itemsViewModel::toggleLike else null,
-                onAuthorClick = { post -> onOpenUser(post.user_id) },
-                savedIds = savedIds,
-                onToggleSave = if (currentUser?.isRegularUser == true) itemsViewModel::toggleSaved else null,
-                emptyText = when {
-                    filters.draftsOnly -> "Nu ai ciorne. Când salvezi o postare ca ciornă, o găsești aici."
-                    filters.followingOnly -> "Nu urmărești încă pe nimeni (sau n-au postat). Atinge numele unui autor ca să-i vezi profilul."
-                    filters.savedOnly -> "Nicio postare salvată. Atinge semnul de carte de pe o postare ca s-o păstrezi ca idee de călătorie."
-                    noFilters -> "Încă nu există postări. Fii primul care adaugă una!"
-                    else -> "Nicio postare nu se potrivește căutării."
-                },
-                onPostClick = { postId ->
-                    val post = itemsUiState.find { it.id == postId }
-                    // "Sincronizare esuata – atinge pentru a corecta": deschide editarea
-                    if (post != null && post.syncStatus == com.example.myandroidapp.todo.data.SyncStatus.FAILED &&
-                        itemsViewModel.canEdit(post, currentUser)
-                    ) {
-                        onEditPost(post.id)
-                        return@PostList
+            // trage lista in jos ca sa o actualizezi de pe server (offline: raman postarile salvate)
+            androidx.compose.material3.pulltorefresh.PullToRefreshBox(
+                isRefreshing = itemsViewModel.isRefreshing,
+                onRefresh = itemsViewModel::loadItems,
+                modifier = Modifier.fillMaxSize()
+            ) {
+                PostList(
+                    posts = itemsUiState,
+                    isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
+                    // doar conturile USER apreciaza (nu adminul, nu vizitatorul anonim)
+                    onToggleLike = if (currentUser?.isRegularUser == true) itemsViewModel::toggleLike else null,
+                    onAuthorClick = { post -> onOpenUser(post.user_id) },
+                    savedIds = savedIds,
+                    onToggleSave = if (currentUser?.isRegularUser == true) itemsViewModel::toggleSaved else null,
+                    emptyText = when {
+                        filters.draftsOnly -> "Nu ai ciorne. Când salvezi o postare ca ciornă, o găsești aici."
+                        filters.followingOnly -> "Nu urmărești încă pe nimeni (sau n-au postat). Atinge numele unui autor ca să-i vezi profilul."
+                        filters.savedOnly -> "Nicio postare salvată. Atinge semnul de carte de pe o postare ca s-o păstrezi ca idee de călătorie."
+                        noFilters -> "Încă nu există postări. Fii primul care adaugă una!"
+                        else -> "Nicio postare nu se potrivește căutării."
+                    },
+                    onPostClick = { postId ->
+                        val post = itemsUiState.find { it.id == postId }
+                        // "Sincronizare esuata – atinge pentru a corecta": deschide editarea
+                        if (post != null && post.syncStatus == com.example.myandroidapp.todo.data.SyncStatus.FAILED &&
+                            itemsViewModel.canEdit(post, currentUser)
+                        ) {
+                            onEditPost(post.id)
+                            return@PostList
+                        }
+                        // detaliile postarii: poza mare, impresiile complete, harta locului
+                        if (post != null) onItemClick(post.id)
+                    },
+                    modifier = Modifier.fillMaxSize(),
+                    actions = { post ->
+                        PostRoleActions(
+                            canDelete = itemsViewModel.canDelete(post, currentUser),
+                            canReport = itemsViewModel.canReport(post, currentUser),
+                            alreadyReported = post.id in reportedByMe,
+                            onDelete = { postToDelete = post },
+                            onReport = { postToReport = post },
+                            canEdit = itemsViewModel.canEdit(post, currentUser),
+                            onEdit = { onEditPost(post.id) },
+                            canPublish = post.status == com.example.myandroidapp.todo.data.PostStatus.DRAFT &&
+                                    itemsViewModel.canEdit(post, currentUser),
+                            onPublish = { itemsViewModel.publishDraft(post) }
+                        )
                     }
-                    // detaliile postarii: poza mare, impresiile complete, harta locului
-                    if (post != null) onItemClick(post.id)
-                },
-                modifier = Modifier.fillMaxSize(),
-                actions = { post ->
-                    PostRoleActions(
-                        canDelete = itemsViewModel.canDelete(post, currentUser),
-                        canReport = itemsViewModel.canReport(post, currentUser),
-                        alreadyReported = post.id in reportedByMe,
-                        onDelete = { postToDelete = post },
-                        onReport = { postToReport = post },
-                        canEdit = itemsViewModel.canEdit(post, currentUser),
-                        onEdit = { onEditPost(post.id) },
-                        canPublish = post.status == com.example.myandroidapp.todo.data.PostStatus.DRAFT &&
-                                itemsViewModel.canEdit(post, currentUser),
-                        onPublish = { itemsViewModel.publishDraft(post) }
-                    )
-                }
-            )
+                )
+            }
         }
     }
 
@@ -608,9 +614,11 @@ private fun ConnectivityBanner(
 }
 
 /**
- * Banda de sub bara de sus: rolul curent si butoanele catre functionalitatile unice ale rolului.
- *  - ADMIN: Administrare
- *  - USER: Postarile mele, Raportarile mele
+ * Scurtaturile de sub bara de sus, in functie de rol:
+ *  - USER: chip-uri cu iconita (Călătorii, Postările mele, Raportările mele, Trackere), derulabile;
+ *  - ADMIN: o eticheta discreta + "Administrare";
+ *  - Vizitator: o linie scurta ca poate doar citi.
+ * E-mailul contului nu mai e afisat aici (e in ecranul Profil).
  */
 @Composable
 fun RoleBar(

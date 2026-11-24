@@ -101,12 +101,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
 
     fun onEmailChanged(email: String) {
         val trimmed = email.trim()   // spatiile de la autocompletare nu fac adresa invalida
-        val error = when {
-            trimmed.isBlank() -> null
-            trimmed.length > 254 -> "Adresa de e-mail este prea lungă"
-            !android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches() -> "Format de e-mail invalid"
-            else -> null
-        }
+        val error = EmailValidator.error(trimmed)
         _uiState.update {
             it.copy(
                 email = trimmed,
@@ -321,9 +316,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
         _uiState.update {
             it.copy(
                 providerEmail = trimmed,
-                providerEmailError = if (trimmed.isNotEmpty() &&
-                    !android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()
-                ) "Format de e-mail invalid" else null
+                providerEmailError = EmailValidator.error(trimmed)
             )
         }
     }
@@ -332,7 +325,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
     fun confirmProviderAccount(email: String, onSessionUnlocked: () -> Unit) {
         val method = _uiState.value.providerPicker ?: return
         val trimmed = email.trim()
-        if (!android.util.Patterns.EMAIL_ADDRESS.matcher(trimmed).matches()) {
+        if (!EmailValidator.isValid(trimmed)) {
             _uiState.update { it.copy(providerEmailError = "Introduceți o adresă de e-mail validă") }
             return
         }

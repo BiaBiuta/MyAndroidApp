@@ -89,6 +89,16 @@ fun MyAppNavHost() {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    // Prima pornire: prezentarea aplicatiei (o singura data pe telefon), apoi login-ul
+    var showOnboarding by rememberSaveable { mutableStateOf(!com.example.myandroidapp.auth.OnboardingPrefs.isDone(appContext)) }
+    if (showOnboarding) {
+        com.example.myandroidapp.auth.OnboardingScreen(onFinish = {
+            com.example.myandroidapp.auth.OnboardingPrefs.markDone(appContext)
+            showOnboarding = false
+        })
+        return
+    }
+
     NavHost(
         navController = navController,
         startDestination = authRoute
@@ -281,6 +291,8 @@ fun MyAppNavHost() {
         composable(route = "$postsRoute-new-private")
         {
             RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                // date private: fara capturi de ecran / previzualizare in aplicatiile recente
+                com.example.myandroidapp.core.ui.SecureScreen()
                 PostAddScreen(
                     onClose = { onClose() },
                     isPrivateInitially = true
@@ -291,6 +303,8 @@ fun MyAppNavHost() {
         {
             // Sectiunea privata: doar USER (datele private sunt ale contului, criptate)
             RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                // seiful: fara capturi de ecran / inregistrare / previzualizare in aplicatiile recente
+                com.example.myandroidapp.core.ui.SecureScreen()
                 PrivatePostsScreen(
                     onBack = { navController.popBackStack() },
                     onAddPrivatePost = { navController.navigate("$postsRoute-new-private") },

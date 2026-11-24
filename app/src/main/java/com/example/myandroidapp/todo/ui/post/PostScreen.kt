@@ -1,6 +1,7 @@
 package com.example.myandroidapp.todo.ui.post
 
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.ContentResolver
 import android.net.Uri
@@ -90,12 +91,38 @@ fun PostAddScreen(
         onClose()
     }
 
+    // iesirea cu modificari nesalvate cere confirmare (si butonul Inapoi al telefonului)
+    val hasChanges = state.title.isNotBlank() || state.description.isNotBlank() || state.photos.isNotEmpty() ||
+            state.rating > 0 || (state.place.isNotBlank() && prefillPlace == null)
+    var confirmDiscard by androidx.compose.runtime.saveable.rememberSaveable { androidx.compose.runtime.mutableStateOf(false) }
+    val requestClose: () -> Unit = {
+        if (hasChanges && !state.saving && state.savedMessage == null) confirmDiscard = true else onClose()
+    }
+    androidx.activity.compose.BackHandler(enabled = hasChanges && !state.saving && state.savedMessage == null) {
+        confirmDiscard = true
+    }
+    if (confirmDiscard) {
+        DiscardChangesDialog(
+            onKeepEditing = { confirmDiscard = false },
+            onDiscard = {
+                confirmDiscard = false
+                onClose()
+            },
+            // ciorna are sens doar pentru o postare publica (cea privata e oricum doar a ta)
+            onSaveDraft = if (state.isPrivate) null else ({
+                confirmDiscard = false
+                viewModel.onDraftChange(true)
+                viewModel.save()
+            })
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (state.isPrivate) "Postare privată nouă" else "Postare nouă") },
                 navigationIcon = {
-                    IconButton(onClick = onClose) {
+                    IconButton(onClick = requestClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Înapoi")
                     }
                 }
@@ -184,7 +211,7 @@ fun PostAddScreen(
             }
 
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                TextButton(onClick = onClose, enabled = !state.saving) { Text("Anulează") }
+                TextButton(onClick = requestClose, enabled = !state.saving) { Text("Anulează") }
                 Spacer(Modifier.width(8.dp))
                 Button(onClick = viewModel::save, enabled = !state.saving) {
                     if (state.saving) {

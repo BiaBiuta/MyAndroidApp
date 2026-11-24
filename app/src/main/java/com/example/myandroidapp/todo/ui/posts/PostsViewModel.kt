@@ -15,6 +15,7 @@ import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.auth.data.RoleRepository
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.auth.data.local.isAdmin
+import com.example.myandroidapp.todo.data.PostPermissions
 import com.example.myandroidapp.auth.data.local.isGuest
 import com.example.myandroidapp.auth.data.local.isRegularUser
 import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
@@ -99,7 +100,7 @@ class PostsViewModel(
         posts.filter { post ->
             val mine = me != null && post.user_id == me
             // ciornele le vede doar autorul; postarile ascunse de moderator: autorul si adminii
-            val visible = (post.status != PostStatus.DRAFT || mine) && (!post.hidden || mine || user?.isAdmin == true)
+            val visible = PostPermissions.canSee(post, user)
             visible &&
                     (!f.mineOnly || mine) &&
                     (!f.draftsOnly || (mine && post.status == PostStatus.DRAFT)) &&
@@ -244,16 +245,13 @@ class PostsViewModel(
     }
 
     /** ADMIN: orice postare. USER: doar postarile proprii. */
-    fun canDelete(post: Post, user: UserEntity?): Boolean =
-        user != null && !user.isGuest && (user.isAdmin || post.user_id == user.ownerKey)
+    fun canDelete(post: Post, user: UserEntity?): Boolean = PostPermissions.canDelete(post, user)
 
     /** Doar autorul isi poate edita postarea (adminul modereaza, nu rescrie postarile altora). */
-    fun canEdit(post: Post, user: UserEntity?): Boolean =
-        user != null && !user.isBlocked && !user.isGuest && post.user_id.isNotEmpty() && post.user_id == user.ownerKey
+    fun canEdit(post: Post, user: UserEntity?): Boolean = PostPermissions.canEdit(post, user)
 
     /** Doar USER (nu admin, nu vizitator) poate raporta postarile altora. */
-    fun canReport(post: Post, user: UserEntity?): Boolean =
-        user != null && user.isRegularUser && post.user_id != user.ownerKey
+    fun canReport(post: Post, user: UserEntity?): Boolean = PostPermissions.canReport(post, user)
 
     fun deletePost(post: Post) {
         viewModelScope.launch {

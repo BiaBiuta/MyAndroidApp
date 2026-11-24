@@ -458,3 +458,38 @@ private fun DateButton(label: String, value: Long, onChange: (Long) -> Unit) {
         Text(if (value > 0) "$label: ${formatVisitDate(value)}" else "$label: alege data")
     }
 }
+
+/**
+ * Confirmarea la iesirea dintr-un formular cu modificari nesalvate (sageata Inapoi, "Anulează"
+ * sau butonul Inapoi al telefonului): nimic din ce a scris utilizatorul nu se pierde din greseala.
+ * [onSaveDraft] (optional) ofera si salvarea ca ciorna.
+ */
+@Composable
+fun DiscardChangesDialog(
+    onKeepEditing: () -> Unit,
+    onDiscard: () -> Unit,
+    onSaveDraft: (() -> Unit)? = null
+) {
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onKeepEditing,
+        title = { Text("Renunți la modificări?") },
+        text = {
+            Text(
+                if (onSaveDraft != null) "Ce ai scris și pozele alese nu sunt salvate. Le poți păstra ca ciornă, vizibilă doar ție."
+                else "Ce ai schimbat nu este salvat încă."
+            )
+        },
+        confirmButton = {
+            if (onSaveDraft != null) {
+                androidx.compose.material3.TextButton(onClick = onSaveDraft) { Text("Salvează ciorna") }
+            } else {
+                androidx.compose.material3.TextButton(onClick = onKeepEditing) { Text("Continuă editarea") }
+            }
+        },
+        dismissButton = {
+            androidx.compose.material3.TextButton(onClick = onDiscard) {
+                Text("Renunță", color = androidx.compose.material3.MaterialTheme.colorScheme.error)
+            }
+        }
+    )
+}

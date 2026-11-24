@@ -89,6 +89,16 @@ data class EditPostUiState(
     val savedMessage: String? = null
 )
 
+/** Ceva din formular difera de postarea incarcata (pentru confirmarea la iesire). */
+val EditPostUiState.hasChanges: Boolean
+    get() {
+        val original = post ?: return false
+        return title != original.title || description != original.description || photos != original.allPhotos ||
+                tripId != original.trip_id || rating != original.rating || visitDate != original.visit_date ||
+                place != original.place || location != original.location ||
+                isDraft != (original.status == PostStatus.DRAFT)
+    }
+
 /**
  * Editarea unei postari proprii (Update din CRUD), si offline: modificarea se salveaza
  * pe telefon ("Pending") si PostRepository o trimite cand serverul e disponibil.
@@ -267,12 +277,31 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
         state.savedMessage?.let { onClose(it) }
     }
 
+    // iesirea cu modificari nesalvate cere confirmare (si butonul Inapoi al telefonului)
+    val hasChanges = state.hasChanges
+    var confirmDiscard by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf(false) }
+    val requestClose: () -> Unit = {
+        if (hasChanges && !state.saving && state.savedMessage == null) confirmDiscard = true else onClose(null)
+    }
+    androidx.activity.compose.BackHandler(enabled = hasChanges && !state.saving && state.savedMessage == null) {
+        confirmDiscard = true
+    }
+    if (confirmDiscard) {
+        com.example.myandroidapp.todo.ui.post.DiscardChangesDialog(
+            onKeepEditing = { confirmDiscard = false },
+            onDiscard = {
+                confirmDiscard = false
+                onClose(null)
+            }
+        )
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text("Editează postarea") },
                 navigationIcon = {
-                    IconButton(onClick = { onClose(null) }) {
+                    IconButton(onClick = requestClose) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Înapoi")
                     }
                 }
@@ -379,7 +408,7 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                         )
                     }
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                        TextButton(onClick = { onClose(null) }, enabled = !state.saving) { Text("Anulează") }
+                        TextButton(onClick = requestClose, enabled = !state.saving) { Text("Anulează") }
                         Spacer(Modifier.width(8.dp))
                         Button(onClick = viewModel::save, enabled = !state.saving) {
                             if (state.saving) {

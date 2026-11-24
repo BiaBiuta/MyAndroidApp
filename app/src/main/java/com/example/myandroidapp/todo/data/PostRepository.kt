@@ -305,7 +305,8 @@ class PostRepository(
      *  - altfel PUT (upsert): 409 = s-a modificat altundeva mai recent -> pastram versiunea serverului;
      *    410 = stearsa de moderator -> modificarile devin ciorna privata;
      *    400 / 403 / 413 -> "Sincronizare esuata" cu mesajul serverului;
-     *  - fara conexiune sau sesiune expirata (401) -> ramane "Pending".
+     *  - fara conexiune, sesiune expirata (401) sau server cu probleme (5xx) -> ramane "Pending".
+     * Decizia pentru fiecare cod de raspuns: [SyncConflictPolicy].
      */
     private suspend fun push(postId: String): WriteResult {
         val local = itemDao.findById(postId) ?: return WriteResult.Sent
@@ -325,19 +326,23 @@ class PostRepository(
         } catch (e: OfflineException) {
             WriteResult.Queued
         } catch (e: ServerException) {
-            when (e.status) {
-                401 -> WriteResult.Queued // sesiune expirata: se trimite dupa o noua autentificare
-                409 -> {
+            val title = SyncConflictPolicy.displayTitle(local.title, local.description)
+            when (SyncConflictPolicy.onServerError(e.status, deletedLocally = local.isDeleted)) {
+                // sesiune expirata / server ocupat: ramane "Pending", se reincearca automat
+                SyncConflictPolicy.Outcome.RETRY_LATER -> WriteResult.Queued
+                SyncConflictPolicy.Outcome.ALREADY_DELETED -> {
+                    itemDao.deleteById(local.id)
+                    WriteResult.Sent
+                }
+                SyncConflictPolicy.Outcome.KEEP_SERVER_VERSION -> {
                     serverItemFrom(e)?.let { storeFromServer(it, overwriteLocalChanges = true) }
                         ?: itemDao.deleteById(local.id)
-                    val message = "„${local.displayTitle()}” a fost modificată pe alt dispozitiv. " +
-                            "S-a păstrat varianta mai nouă."
+                    val message = SyncConflictPolicy.keptServerVersionMessage(title)
                     _syncNotices.tryEmit(message)
                     WriteResult.Resolved(message)
                 }
-                410 -> {
+                SyncConflictPolicy.Outcome.SAVE_AS_PRIVATE_DRAFT -> {
                     itemDao.deleteById(local.id)
-                    if (local.isDeleted) return WriteResult.Sent
                     // nimic din ce a scris utilizatorul nu se pierde: devine ciorna privata
                     savePrivate(
                         local.copy(
@@ -348,21 +353,17 @@ class PostRepository(
                             syncError = ""
                         )
                     )
-                    val message = "„${local.displayTitle()}” a fost ștearsă de un moderator. " +
-                            "Modificările tale au fost salvate ca ciornă în secțiunea privată."
+                    val message = SyncConflictPolicy.savedAsDraftMessage(title)
                     _syncNotices.tryEmit(message)
                     WriteResult.Resolved(message)
                 }
-                else -> {
+                SyncConflictPolicy.Outcome.FAILED -> {
                     itemDao.markFailed(local.id, e.message)
                     WriteResult.Failed(e.message)
                 }
             }
         }
     }
-
-    private fun Post.displayTitle(): String =
-        title.ifBlank { description.take(40) }.ifBlank { "Postarea" }
 
     /** Versiunea de pe server din corpul unui raspuns 409: {"message": "...", "item": {...}}. */
     private fun serverItemFrom(e: ServerException): Post? = try {
