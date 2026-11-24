@@ -85,6 +85,10 @@ abstract class ItemDao {
     @Query("DELETE FROM Posts WHERE id = :id")
     abstract suspend fun deleteById(id: String): Unit
 
+    // calatoria a fost stearsa: postarile ei raman, fara calatorie
+    @Query("UPDATE Posts SET trip_id = '' WHERE trip_id = :tripId")
+    abstract suspend fun clearTrip(tripId: String)
+
     // Postarile private nu se trimit niciodata pe server
     // Coada de sincronizare: create / editate / sterse offline (FAILED asteapta corectarea)
     @Query("SELECT * FROM Posts WHERE isNotSaved = 1 AND isPrivate = 0 AND syncStatus = 'PENDING' ORDER BY updated_at ASC")

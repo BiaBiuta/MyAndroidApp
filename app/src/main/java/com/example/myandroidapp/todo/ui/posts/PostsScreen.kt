@@ -1,5 +1,7 @@
 package com.example.myapplication.todo.ui.items
 
+import androidx.compose.material.icons.filled.Bookmark
+import androidx.compose.material.icons.filled.People
 import androidx.compose.material.icons.filled.AccountCircle
 import androidx.compose.material.icons.filled.Map
 import androidx.compose.ui.semantics.contentDescription
@@ -68,7 +70,9 @@ import com.example.myapplication.network.MyNetworkStatusViewModel
 import com.ilazar.myanimationsapp.MyFloatingActionButton
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-
+import androidx.compose.material.icons.filled.Luggage
+import androidx.compose.material.icons.filled.PhotoLibrary
+import androidx.compose.material.icons.filled.Sensors
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun PostsScreen(
@@ -84,9 +88,12 @@ fun PostsScreen(
     onOpenMyReports: () -> Unit = {},
     // doar USER: trackerele IoT asociate
     onOpenDevices: () -> Unit = {},
+    onOpenTrips: () -> Unit = {},
     // harta cu toate postarile si profilul (statistici, parola, deconectare)
     onOpenMap: () -> Unit = {},
     onOpenProfile: () -> Unit = {},
+    // profilul public al unui calator (atingerea numelui autorului)
+    onOpenUser: (userId: String) -> Unit = {},
     // doar autorul: editarea postarii proprii
     onEditPost: (id: String) -> Unit = {},
     // comutatorul de amprenta: vizibil doar pentru sesiunile salvate (login cu e-mail si parola)
@@ -235,6 +242,7 @@ fun PostsScreen(
                 user = currentUser,
                 onOpenMyPosts = onOpenMyPosts,
                 onOpenDevices = onOpenDevices,
+                onOpenTrips = onOpenTrips,
                 onOpenMyReports = onOpenMyReports,
                 onOpenAdmin = onOpenAdmin
             )
@@ -267,6 +275,7 @@ fun PostsScreen(
             // Cautare dupa destinatie + filtre (Toate / Ale mele / Ciornele mele / rating minim)
             val filters by itemsViewModel.filters.collectAsStateWithLifecycle()
             val myDraftCount by itemsViewModel.myDraftCount.collectAsStateWithLifecycle()
+            val savedIds by itemsViewModel.saved.collectAsStateWithLifecycle()
             SearchAndFilters(
                 filters = filters,
                 showMineFilter = currentUser?.isRegularUser == true,
@@ -275,7 +284,9 @@ fun PostsScreen(
                 onMinRatingChange = itemsViewModel::onMinRatingChange,
                 onSortByRatingChange = itemsViewModel::onSortByRatingChange,
                 draftCount = myDraftCount,
-                onDraftsOnlyChange = itemsViewModel::onDraftsOnlyChange
+                onDraftsOnlyChange = itemsViewModel::onDraftsOnlyChange,
+                onFollowingOnlyChange = itemsViewModel::onFollowingOnlyChange,
+                onSavedOnlyChange = itemsViewModel::onSavedOnlyChange
             )
             val noFilters = filters == PostsViewModel.Filters()
             PostList(
@@ -283,8 +294,13 @@ fun PostsScreen(
                 isOwn = { it.user_id.isNotEmpty() && it.user_id == currentUser?.ownerKey },
                 // doar conturile USER apreciaza (nu adminul, nu vizitatorul anonim)
                 onToggleLike = if (currentUser?.isRegularUser == true) itemsViewModel::toggleLike else null,
+                onAuthorClick = { post -> onOpenUser(post.user_id) },
+                savedIds = savedIds,
+                onToggleSave = if (currentUser?.isRegularUser == true) itemsViewModel::toggleSaved else null,
                 emptyText = when {
                     filters.draftsOnly -> "Nu ai ciorne. Când salvezi o postare ca ciornă, o găsești aici."
+                    filters.followingOnly -> "Nu urmărești încă pe nimeni (sau n-au postat). Atinge numele unui autor ca să-i vezi profilul."
+                    filters.savedOnly -> "Nicio postare salvată. Atinge semnul de carte de pe o postare ca s-o păstrezi ca idee de călătorie."
                     noFilters -> "Încă nu există postări. Fii primul care adaugă una!"
                     else -> "Nicio postare nu se potrivește căutării."
                 },
@@ -438,7 +454,9 @@ private fun SearchAndFilters(
     onMinRatingChange: (Int) -> Unit,
     onSortByRatingChange: (Boolean) -> Unit,
     draftCount: Int = 0,
-    onDraftsOnlyChange: (Boolean) -> Unit = {}
+    onDraftsOnlyChange: (Boolean) -> Unit = {},
+    onFollowingOnlyChange: (Boolean) -> Unit = {},
+    onSavedOnlyChange: (Boolean) -> Unit = {}
 ) {
     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)) {
         androidx.compose.material3.OutlinedTextField(
@@ -478,6 +496,19 @@ private fun SearchAndFilters(
                     onClick = { onDraftsOnlyChange(!filters.draftsOnly) },
                     leadingIcon = { Icon(Icons.Default.EditNote, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     label = { androidx.compose.material3.Text("Ciornele mele ($draftCount)") }
+                )
+                // calatorii urmariti / ideile salvate (merg si offline)
+                androidx.compose.material3.FilterChip(
+                    selected = filters.followingOnly,
+                    onClick = { onFollowingOnlyChange(!filters.followingOnly) },
+                    leadingIcon = { Icon(Icons.Default.People, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    label = { androidx.compose.material3.Text("Urmăriți") }
+                )
+                androidx.compose.material3.FilterChip(
+                    selected = filters.savedOnly,
+                    onClick = { onSavedOnlyChange(!filters.savedOnly) },
+                    leadingIcon = { Icon(Icons.Default.Bookmark, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    label = { androidx.compose.material3.Text("Salvate") }
                 )
             }
             androidx.compose.material3.FilterChip(
@@ -587,59 +618,62 @@ fun RoleBar(
     onOpenMyPosts: () -> Unit,
     onOpenAdmin: () -> Unit,
     onOpenMyReports: () -> Unit = {},
-    onOpenDevices: () -> Unit = {}
+    onOpenDevices: () -> Unit = {},
+    onOpenTrips: () -> Unit = {}
 ) {
-    // Culori din tema (Material 3): contrast corect atat in tema luminoasa, cat si in cea intunecata
-    androidx.compose.material3.Surface(
-        color = if (user?.isAdmin == true) androidx.compose.material3.MaterialTheme.colorScheme.primaryContainer
-        else androidx.compose.material3.MaterialTheme.colorScheme.secondaryContainer,
-        contentColor = if (user?.isAdmin == true) androidx.compose.material3.MaterialTheme.colorScheme.onPrimaryContainer
-        else androidx.compose.material3.MaterialTheme.colorScheme.onSecondaryContainer,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Column {
-            Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Icon(
-                    imageVector = when {
-                        user?.isAdmin == true -> Icons.Default.AdminPanelSettings
-                        user?.isGuest == true -> Icons.Default.Visibility
-                        else -> Icons.Default.Person
-                    },
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = when {
-                        user == null -> "Se încarcă contul…"
-                        user.isAdmin -> "Administrator · ${user.email}"
-                        user.isGuest -> "Vizitator anonim · poți doar citi postările"
-                        else -> "Utilizator · ${user.email} · ${AuthProvider.label(user.provider)}"
-                    },
-                    style = MaterialTheme.typography.body2,
+    val colors = androidx.compose.material3.MaterialTheme.colorScheme
+    when {
+        user == null -> Unit
+        user.isAdmin -> androidx.compose.material3.Surface(
+            color = colors.primaryContainer,
+            contentColor = colors.onPrimaryContainer,
+            shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp)
+        ) {
+            Row(modifier = Modifier.padding(start = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.AdminPanelSettings, contentDescription = null, modifier = Modifier.size(18.dp))
+                Spacer(Modifier.width(8.dp))
+                androidx.compose.material3.Text(
+                    "Mod administrator",
+                    style = androidx.compose.material3.MaterialTheme.typography.labelLarge,
                     modifier = Modifier.weight(1f)
                 )
-                if (user != null && user.isAdmin) {
-                    TextButton(onClick = onOpenAdmin) { Text("Administrare") }
-                }
-            }
-            if (user != null && user.isRegularUser) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.End
-                ) {
-                    TextButton(onClick = onOpenMyPosts) { Text("Postările mele") }
-                    TextButton(onClick = onOpenMyReports) { Text("Raportările mele") }
-                    TextButton(onClick = onOpenDevices) { Text("Trackere") }
-                }
+                androidx.compose.material3.TextButton(onClick = onOpenAdmin) { androidx.compose.material3.Text("Administrare") }
             }
         }
+        user.isGuest -> Row(
+            modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(16.dp), tint = colors.onSurfaceVariant)
+            Spacer(Modifier.width(6.dp))
+            androidx.compose.material3.Text(
+                "Vizitator · poți doar citi postările",
+                style = androidx.compose.material3.MaterialTheme.typography.labelMedium,
+                color = colors.onSurfaceVariant
+            )
+        }
+        user.isRegularUser -> androidx.compose.foundation.lazy.LazyRow(
+            contentPadding = PaddingValues(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+        ) {
+            item { ShortcutChip("Călătorii", Icons.Default.Luggage, onOpenTrips) }
+            item { ShortcutChip("Postările mele", Icons.Default.PhotoLibrary, onOpenMyPosts) }
+            item { ShortcutChip("Raportări", Icons.Default.Flag, onOpenMyReports) }
+            item { ShortcutChip("Trackere", Icons.Default.Sensors, onOpenDevices) }
+        }
     }
+}
+
+@Composable
+private fun ShortcutChip(label: String, icon: androidx.compose.ui.graphics.vector.ImageVector, onClick: () -> Unit) {
+    androidx.compose.material3.AssistChip(
+        onClick = onClick,
+        label = { androidx.compose.material3.Text(label) },
+        leadingIcon = { Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp)) },
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+    )
 }
 
 /**

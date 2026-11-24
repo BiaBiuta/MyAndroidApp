@@ -61,6 +61,11 @@ class AppContainer(val context: Context) {
             ensureServerSession = { upgradeOfflineSession() },
             onNewPostFromOthers = { postNotifications.newPostFromOthers(it) },
             onOfflinePostsSynced = { postNotifications.offlinePostsSynced(it) },
+            syncBeforePosts = { communityRepository.syncTrips() },
+            afterRefresh = {
+                communityRepository.refreshTrips()
+                communityRepository.refreshFollowing()
+            },
             scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
         )
     }
@@ -98,6 +103,20 @@ class AppContainer(val context: Context) {
         Api.tokenInterceptor.token = upgraded.token
         postRepository.setToken(upgraded.token)
         return true
+    }
+
+    // Comunitatea: calatorii, profiluri / urmarire, postari salvate, comentarii editate / apreciate
+    val communityRepository: com.example.myandroidapp.community.data.CommunityRepository by lazy {
+        com.example.myandroidapp.community.data.CommunityRepository(
+            service = Api.retrofit.create(com.example.myandroidapp.community.data.CommunityService::class.java),
+            tripDao = database.tripDao(),
+            followDao = database.followDao(),
+            savedDao = database.savedPostDao(),
+            itemDao = database.itemDao(),
+            ownerKeys = userPreferencesRepository.userPreferencesStream.map { it.ownerKey },
+            currentOwnerKey = { userPreferencesRepository.userPreferencesStream.first().ownerKey },
+            scheduleSync = { com.example.myandroidapp.jobs.SyncScheduler.schedule(context) }
+        )
     }
 
     val postNotifications by lazy { com.example.myandroidapp.notifications.PostNotifications(context) }

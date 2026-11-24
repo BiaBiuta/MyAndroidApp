@@ -142,9 +142,14 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
     private fun parseEvent(text: String): PostEvent? {
         val json = JSONObject(text)
         val event = json.optString("event").ifEmpty { json.optString("type") }
-        if (event !in setOf("created", "updated", "deleted")) return null
+        if (event !in setOf("created", "updated", "deleted", "comments")) return null
         val payload = json.optJSONObject("payload") ?: return null
         val p = payload.optJSONObject("item") ?: payload
+        // comentariile unei postari s-au schimbat (adaugat / editat / apreciat / sters)
+        if (event == "comments") {
+            val postId = p.opt("id")?.toString().orEmpty()
+            return if (postId.isEmpty()) null else PostEvent(event, Payload(Post(id = postId)))
+        }
 
         val id = p.opt("id")?.toString().orEmpty().ifEmpty { p.opt("_id")?.toString().orEmpty() }
         if (id.isEmpty()) return null

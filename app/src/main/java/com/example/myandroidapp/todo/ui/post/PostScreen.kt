@@ -1,5 +1,7 @@
 package com.example.myandroidapp.todo.ui.post
 
+import androidx.compose.runtime.getValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import android.content.ContentResolver
 import android.net.Uri
 import android.os.Bundle
@@ -128,7 +130,23 @@ fun PostAddScreen(
                 modifier = Modifier.fillMaxWidth()
             )
 
-            PhotoPickerField(photo = state.photo, enabled = !state.saving, onPhotoPicked = viewModel::onPhotoPicked)
+            GalleryPickerField(
+                photos = state.photos,
+                enabled = !state.saving,
+                onPhotosChange = viewModel::onPhotosChange,
+                onError = viewModel::onPhotoError
+            )
+            // calatoria (albumul); postarile private nu fac parte din calatorii
+            if (!state.isPrivate) {
+                val trips by viewModel.trips.collectAsStateWithLifecycle()
+                TripPickerField(
+                    tripId = state.tripId,
+                    trips = trips,
+                    enabled = !state.saving,
+                    onTripChange = viewModel::onTripChange,
+                    onCreateTrip = viewModel::createTrip
+                )
+            }
             RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
             VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
 

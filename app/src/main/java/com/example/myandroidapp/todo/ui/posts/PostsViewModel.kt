@@ -43,8 +43,19 @@ import kotlinx.coroutines.launch
  */
 class PostsViewModel(
     private val postRepository: PostRepository,
-    private val roleRepository: RoleRepository
+    private val roleRepository: RoleRepository,
+    private val community: com.example.myandroidapp.community.data.CommunityRepository
 ) : ViewModel() {
+    /** Calatorii urmariti si postarile salvate (ambele pastrate si pe telefon). */
+    val following: StateFlow<Set<String>> = community.following.map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val saved: StateFlow<Set<String>> = community.saved.map { it.toSet() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    /** Salveaza / scoate din "Salvate" (si offline: doar pe telefon). */
+    fun toggleSaved(post: Post) {
+        viewModelScope.launch { community.setSaved(post.id, post.id !in saved.value) }
+    }
     /** Contul logat, cu rolul lui (null = vizitator). */
     val currentUser: StateFlow<UserEntity?> = roleRepository.currentUser
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -58,7 +69,10 @@ class PostsViewModel(
         // doar ciornele proprii (le vede doar autorul, pana le publica)
         val draftsOnly: Boolean = false,
         // true = cele mai bine notate primele (la rating egal: cele mai noi); false = cele mai noi primele
-        val sortByRating: Boolean = false
+        val sortByRating: Boolean = false,
+        // doar postarile calatorilor urmariti / doar cele salvate
+        val followingOnly: Boolean = false,
+        val savedOnly: Boolean = false
     )
 
     private val _filters = MutableStateFlow(Filters())
@@ -69,13 +83,17 @@ class PostsViewModel(
     fun onMinRatingChange(value: Int) = _filters.update { it.copy(minRating = value.coerceIn(0, 5)) }
     fun onDraftsOnlyChange(value: Boolean) = _filters.update { it.copy(draftsOnly = value) }
     fun onSortByRatingChange(value: Boolean) = _filters.update { it.copy(sortByRating = value) }
+    fun onFollowingOnlyChange(value: Boolean) = _filters.update { it.copy(followingOnly = value, savedOnly = false) }
+    fun onSavedOnlyChange(value: Boolean) = _filters.update { it.copy(savedOnly = value, followingOnly = false) }
     fun clearFilters() = _filters.update { Filters() }
 
     /**
      * Feed-ul: postarile din Room (actualizate singur de server / WebSocket / sincronizare),
      * filtrate dupa ce are voie sa vada contul curent si dupa cautare / filtre.
      */
-    val uiState: Flow<List<Post>> = combine(postRepository.itemStream, currentUser, _filters) { posts, user, f ->
+    val uiState: Flow<List<Post>> = combine(
+        postRepository.itemStream, currentUser, _filters, following, saved
+    ) { posts, user, f, followed, savedIds ->
         val me = user?.ownerKey
         val words = normalize(f.query).split(' ').filter { it.isNotBlank() }
         posts.filter { post ->
@@ -85,6 +103,8 @@ class PostsViewModel(
             visible &&
                     (!f.mineOnly || mine) &&
                     (!f.draftsOnly || (mine && post.status == PostStatus.DRAFT)) &&
+                    (!f.followingOnly || post.user_id in followed) &&
+                    (!f.savedOnly || post.id in savedIds) &&
                     (f.minRating == 0 || post.rating >= f.minRating) &&
                     // in cautare intra si numele locului
                     words.all { word -> normalize("${post.title} ${post.place} ${post.description}").contains(word) }
@@ -280,7 +300,7 @@ class PostsViewModel(
             initializer {
                 val app =
                     (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
-                PostsViewModel(app.container.postRepository, app.container.roleRepository)
+                PostsViewModel(app.container.postRepository, app.container.roleRepository, app.container.communityRepository)
             }
         }
     }

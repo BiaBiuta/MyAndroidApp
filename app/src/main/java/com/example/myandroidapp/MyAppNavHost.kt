@@ -54,6 +54,9 @@ val devicesRoute = "devices"
 val mapRoute = "map"
 val profileRoute = "profile"
 val postFromVisitRoute = "posts-new-visit"
+val tripsRoute = "trips"
+val tripDetailRoute = "trips/detail"
+val userProfileRoute = "users"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -119,6 +122,8 @@ fun MyAppNavHost() {
                 onOpenDevices = { navController.navigate(devicesRoute) },
                 onOpenMap = { navController.navigate(mapRoute) },
                 onOpenProfile = { navController.navigate(profileRoute) },
+                onOpenTrips = { navController.navigate(tripsRoute) },
+                onOpenUser = { userId -> if (userId.isNotBlank()) navController.navigate("$userProfileRoute/${Uri.encode(userId)}") },
                 onEditPost = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
                 // vizitatorul anonim nu are ce debloca cu amprenta
                 showBiometricToggle = sessionState is SessionState.Active && currentUser?.isGuest != true,
@@ -150,7 +155,45 @@ fun MyAppNavHost() {
             PostDetailScreen(
                 postId = entry.arguments?.getString("id").orEmpty(),
                 onBack = { navController.popBackStack() },
-                onEdit = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") }
+                onEdit = { id -> navController.navigate("$editPostRoute/${Uri.encode(id)}") },
+                onOpenUser = { userId -> if (userId.isNotBlank()) navController.navigate("$userProfileRoute/${Uri.encode(userId)}") },
+                onOpenTrip = { tripId, ownerId -> navController.navigate("$tripDetailRoute/${Uri.encode(tripId)}?owner=${Uri.encode(ownerId)}") }
+            )
+        }
+        // Doar USER: calatoriile mele (albume de postari, cu traseu pe harta); merg si offline
+        composable(route = tripsRoute) {
+            RoleGuard(allowed = currentUser?.isRegularUser == true, onDenied = { navController.popBackStack() }) {
+                com.example.myandroidapp.community.ui.TripsScreen(
+                    onBack = { navController.popBackStack() },
+                    onOpenTrip = { tripId, ownerId -> navController.navigate("$tripDetailRoute/${Uri.encode(tripId)}?owner=${Uri.encode(ownerId)}") }
+                )
+            }
+        }
+        // O calatorie (a mea sau a altui calator): traseu, statistici, postari
+        composable(
+            route = "$tripDetailRoute/{id}?owner={owner}",
+            arguments = listOf(
+                navArgument("id") { type = NavType.StringType },
+                navArgument("owner") { type = NavType.StringType; defaultValue = "" }
+            )
+        ) { entry ->
+            com.example.myandroidapp.community.ui.TripDetailScreen(
+                tripId = entry.arguments?.getString("id").orEmpty(),
+                ownerId = entry.arguments?.getString("owner").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenPost = { id -> navController.navigate("$postDetailRoute/${Uri.encode(id)}") }
+            )
+        }
+        // Profilul public al altui calator: statistici, Urmareste, postarile si calatoriile lui
+        composable(
+            route = "$userProfileRoute/{id}",
+            arguments = listOf(navArgument("id") { type = NavType.StringType })
+        ) { entry ->
+            com.example.myandroidapp.community.ui.UserProfileScreen(
+                userId = entry.arguments?.getString("id").orEmpty(),
+                onBack = { navController.popBackStack() },
+                onOpenPost = { id -> navController.navigate("$postDetailRoute/${Uri.encode(id)}") },
+                onOpenTrip = { tripId, ownerId -> navController.navigate("$tripDetailRoute/${Uri.encode(tripId)}?owner=${Uri.encode(ownerId)}") }
             )
         }
         // Editarea unei postari proprii (dreptul e verificat si in EditPostViewModel)

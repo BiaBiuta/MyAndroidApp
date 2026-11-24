@@ -14,6 +14,12 @@ import com.example.myandroidapp.auth.data.local.UserDao
 import com.example.myandroidapp.auth.data.local.UserEntity
 import com.example.myandroidapp.todo.data.Post
 import com.example.myandroidapp.iot.data.local.PairedDeviceDao
+import com.example.myandroidapp.community.data.FollowDao
+import com.example.myandroidapp.community.data.FollowEntity
+import com.example.myandroidapp.community.data.SavedPostDao
+import com.example.myandroidapp.community.data.SavedPostEntity
+import com.example.myandroidapp.community.data.TripDao
+import com.example.myandroidapp.community.data.TripEntity
 import com.example.myandroidapp.iot.data.local.PairedDeviceEntity
 import com.example.myandroidapp.todo.data.local.AuthorNoticeEntity
 import com.example.myandroidapp.todo.data.local.HiddenPostEntity
@@ -32,15 +38,20 @@ import com.example.myapp.todo.data.local.ItemDao
 // version 11: numele locului (place)
 // version 12: trackerele asociate (paired_devices), cu cheia de asociere criptata
 // version 13: poza ca fisier (photoPath / photo_url), aprecieri si comentarii (numere de la server)
+// version 14: galerie de poze, calatorii (trips), urmariri (following), postari salvate (saved_posts)
 @Database(
-    entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class, PairedDeviceEntity::class],
-    version = 13
+    entities = [Post::class, UserEntity::class, ReportEntity::class, HiddenPostEntity::class, AuthorNoticeEntity::class, PairedDeviceEntity::class,
+        TripEntity::class, FollowEntity::class, SavedPostEntity::class],
+    version = 14
 )
 abstract class MyAppDatabase : RoomDatabase() {
     abstract fun itemDao(): ItemDao
     abstract fun userDao(): UserDao
     abstract fun moderationDao(): ModerationDao
     abstract fun pairedDeviceDao(): PairedDeviceDao
+    abstract fun tripDao(): TripDao
+    abstract fun followDao(): FollowDao
+    abstract fun savedPostDao(): SavedPostDao
 
     companion object {
         @Volatile
@@ -143,6 +154,28 @@ abstract class MyAppDatabase : RoomDatabase() {
         }
 
         // 10 -> 11: numele locului (harta OpenStreetMap in loc de Google Maps)
+        // 13 -> 14: galerie, calatorii, urmariri, postari salvate
+        private val MIGRATION_13_14 = object : Migration(13, 14) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `gallery` TEXT NOT NULL DEFAULT '[]'")
+                db.execSQL("ALTER TABLE `posts` ADD COLUMN `trip_id` TEXT NOT NULL DEFAULT ''")
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `trips` (`id` TEXT NOT NULL, `ownerKey` TEXT NOT NULL, `title` TEXT NOT NULL, " +
+                            "`description` TEXT NOT NULL, `startDate` INTEGER NOT NULL, `endDate` INTEGER NOT NULL, " +
+                            "`updatedAt` TEXT NOT NULL, `syncStatus` TEXT NOT NULL, `syncError` TEXT NOT NULL, " +
+                            "`isDeleted` INTEGER NOT NULL, PRIMARY KEY(`id`))"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `following` (`ownerKey` TEXT NOT NULL, `userId` TEXT NOT NULL, " +
+                            "PRIMARY KEY(`ownerKey`, `userId`))"
+                )
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `saved_posts` (`ownerKey` TEXT NOT NULL, `postId` TEXT NOT NULL, " +
+                            "`savedAt` INTEGER NOT NULL, PRIMARY KEY(`ownerKey`, `postId`))"
+                )
+            }
+        }
+
         // 12 -> 13: poza ca fisier local + adresa ei pe server; aprecieri si comentarii
         private val MIGRATION_12_13 = object : Migration(12, 13) {
             override fun migrate(db: SupportSQLiteDatabase) {
@@ -191,7 +224,7 @@ abstract class MyAppDatabase : RoomDatabase() {
                     context,
                     MyAppDatabase::class.java,
                     "app_database"
-                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13)
+                ).addMigrations(MIGRATION_3_7, MIGRATION_4_7, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9, MIGRATION_9_10, MIGRATION_10_11, MIGRATION_11_12, MIGRATION_12_13, MIGRATION_13_14)
                     .fallbackToDestructiveMigration()
                     .addCallback(REPAIR_OVERSIZED_PHOTOS)
                     .build()

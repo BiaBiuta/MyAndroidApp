@@ -16,10 +16,17 @@ data class PhotoUpload(val id: String = "", val url: String = "", val size: Long
 data class Comment(
     val id: String = "",
     val post_id: String = "",
+    // "" = comentariu pe primul nivel; altfel id-ul comentariului la care raspunde
+    val parent_id: String = "",
     val user_id: String = "",
     val author: String = "",
     val text: String = "",
     val created_at: String = "",
+    // "" = needitat; altfel momentul ultimei editari (afisat "editat")
+    val edited_at: String = "",
+    val like_count: Int = 0,
+    val liked_by_me: Boolean = false,
+    val can_edit: Boolean = false,
     val can_delete: Boolean = false
 )
 

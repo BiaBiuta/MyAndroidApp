@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.post
 
+import kotlinx.coroutines.flow.stateIn
 import android.util.Log
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -25,7 +26,10 @@ data class PostFormState(
     val title: String = "",
     val description: String = "",
     // Base64 ("data:image/jpeg;base64,...") deja micsorat de PhotoEncoder; "" = fara poza
-    val photo: String = "",
+    // pozele (max. 6): prima e cea principala; cai de fisiere locale pana la sincronizare
+    val photos: List<String> = emptyList(),
+    // calatoria (albumul) postarii; "" = niciuna
+    val tripId: String = "",
     val rating: Int = 0,
     val visitDate: Long = System.currentTimeMillis(),
     // locul vizitat (OpenStreetMap): nume + coordonate; Location() = fara loc
@@ -47,8 +51,27 @@ data class PostFormState(
  */
 class PostViewModel(
     private val postRepository: PostRepository,
-    private val roleRepository: RoleRepository
+    private val roleRepository: RoleRepository,
+    private val community: com.example.myandroidapp.community.data.CommunityRepository
 ) : ViewModel() {
+
+    /** Calatoriile proprii, pentru alegerea albumului postarii. */
+    val trips = community.myTrips.stateIn(
+        viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    fun onTripChange(id: String) {
+        state = state.copy(tripId = id)
+    }
+
+    /** Calatorie noua direct din formular (si offline); devine calatoria postarii. */
+    fun createTrip(title: String, startDate: Long, endDate: Long) {
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            val trip = community.saveTrip(null, title, "", startDate, endDate)
+            state = state.copy(tripId = trip.id)
+        }
+    }
 
     var state by mutableStateOf(PostFormState())
         private set
@@ -61,9 +84,12 @@ class PostViewModel(
         if (value.length <= MAX_DESCRIPTION) state = state.copy(description = value, error = null)
     }
 
-    fun onPhotoPicked(photo: String?) {
-        state = if (photo == null) state.copy(error = "Poza nu a putut fi citită. Încercați alta.")
-        else state.copy(photo = photo, error = null)
+    fun onPhotosChange(photos: List<String>) {
+        state = state.copy(photos = photos.take(MAX_PHOTOS), error = null)
+    }
+
+    fun onPhotoError(message: String) {
+        state = state.copy(error = message)
     }
 
     fun onRatingChange(value: Int) {
@@ -104,7 +130,7 @@ class PostViewModel(
         val form = state
         val title = form.title.trim()
         val description = form.description.trim()
-        if (title.isEmpty() && description.isEmpty() && form.photo.isEmpty()) {
+        if (title.isEmpty() && description.isEmpty() && form.photos.isEmpty()) {
             state = form.copy(error = "Adăugați cel puțin un titlu, un text sau o poză.")
             return
         }
@@ -135,8 +161,9 @@ class PostViewModel(
                     // ownerKey = id-ul de pe server; postarile proprii se recunosc dupa el
                     user_id = user.ownerKey,
                     user_first_name = user.email.substringBefore("@"),
-                    created_at = com.example.myandroidapp.core.isoNow()
-                ).withPhoto(form.photo) // fisierul pozei: se urca pe server inaintea postarii
+                    created_at = com.example.myandroidapp.core.isoNow(),
+                    trip_id = if (form.isPrivate) "" else form.tripId
+                ).withPhotos(form.photos) // fisierele pozelor: se urca pe server inaintea postarii
                 val message = if (form.isPrivate) {
                     postRepository.savePrivate(post.copy(isPrivate = true))
                     "Postarea a fost salvată în secțiunea privată."
@@ -158,11 +185,12 @@ class PostViewModel(
         private const val TAG = "PostViewModel"
         const val MAX_TITLE = 120
         const val MAX_DESCRIPTION = 2000
+        const val MAX_PHOTOS = 6
 
         val Factory: ViewModelProvider.Factory = viewModelFactory {
             initializer {
                 val app = (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
-                PostViewModel(app.container.postRepository, app.container.roleRepository)
+                PostViewModel(app.container.postRepository, app.container.roleRepository, app.container.communityRepository)
             }
         }
     }

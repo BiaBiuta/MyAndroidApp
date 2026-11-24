@@ -77,6 +77,10 @@ class PostRepository(
     // notificari: postare noua de la altcineva / postari offline ajunse pe server
     private val onNewPostFromOthers: (Post) -> Unit = {},
     private val onOfflinePostsSynced: (Int) -> Unit = {},
+    // calatoriile create offline se trimit INAINTEA postarilor (o postare le poate referi)
+    private val syncBeforePosts: suspend () -> Boolean = { true },
+    // dupa reimprospatarea listei: calatoriile si lista "Urmariti" de pe server
+    private val afterRefresh: suspend () -> Unit = {},
     // programeaza sincronizarea cand revine reteaua (WorkManager), pentru ce a ramas in coada
     private val scheduleSync: () -> Unit = {}
 ) {
@@ -382,7 +386,8 @@ class PostRepository(
                     title = SecureStore.decrypt(it.title),
                     place = SecureStore.decrypt(it.place),
                     description = SecureStore.decrypt(it.description),
-                    photo = SecureStore.decrypt(it.photo)
+                    photo = SecureStore.decrypt(it.photo),
+                    gallery = it.gallery.map(SecureStore::decrypt)
                 )
             }
         }
@@ -393,12 +398,18 @@ class PostRepository(
         // poza ca fisier -> criptata in baza de date, ca restul postarii private; fisierul se sterge
         val withPhoto = withContext(Dispatchers.IO) {
             val path = post.photoPath
-            if (path.isBlank()) post
+            val withCover = if (path.isBlank()) post
             else {
                 val inline = com.example.myandroidapp.todo.ui.post.PhotoEncoder.fileToBase64(path).orEmpty()
                 runCatching { java.io.File(path).delete() }
                 post.copy(photo = inline.ifBlank { post.photo }, photoPath = "", photo_url = "")
             }
+            // si galeria: fiecare poza devine Base64 (criptat mai jos), fisierele se sterg
+            withCover.copy(gallery = withCover.gallery.mapNotNull { entry ->
+                if (entry.startsWith("data:")) entry
+                else com.example.myandroidapp.todo.ui.post.PhotoEncoder.fileToBase64(entry)
+                    ?.also { runCatching { java.io.File(entry).delete() } }
+            })
         }
         val privatePost = withPhoto.copy(
             id = post.id.ifEmpty { "private-" + java.util.UUID.randomUUID().toString() },
@@ -410,7 +421,8 @@ class PostRepository(
                 title = SecureStore.encrypt(privatePost.title),
                 place = SecureStore.encrypt(privatePost.place),
                 description = SecureStore.encrypt(privatePost.description),
-                photo = SecureStore.encrypt(privatePost.photo)
+                photo = SecureStore.encrypt(privatePost.photo),
+                gallery = privatePost.gallery.map(SecureStore::encrypt)
             )
         }
         itemDao.insert(encrypted)
@@ -448,6 +460,7 @@ class PostRepository(
                 posts.filter { it.id !in dirtyIds }.map { it.asSynced().safeForCache() }
             )
             Log.d(TAG, "refresh succeeded: ${posts.size}")
+            runCatching { afterRefresh() }
             null
         } catch (e: OfflineException) {
             Log.w(TAG, "refresh: server indisponibil", e)
@@ -499,6 +512,7 @@ class PostRepository(
                             "created" -> handleItemCreated(itemEvent.payload.item)
                             "updated" -> handleItemUpdated(itemEvent.payload.item)
                             "deleted" -> handleItemDeleted(itemEvent.payload.item)
+                            "comments" -> _commentChanges.tryEmit(itemEvent.payload.item.id)
                         }
                     }
                 }
@@ -546,6 +560,23 @@ class PostRepository(
      * reincercare dupa o conexiune cazuta nu o dubleaza. Adresa primita se salveaza imediat local.
      */
     private suspend fun uploadPhotoIfNeeded(post: Post): Post {
+        val withCover = uploadCoverIfNeeded(post)
+        // galeria: fiecare poza locala se urca si e inlocuita cu adresa ei
+        if (withCover.gallery.none { !it.startsWith("/photos/") }) return withCover
+        val urls = withCover.gallery.mapNotNull { entry ->
+            if (entry.startsWith("/photos/")) entry
+            else {
+                val file = java.io.File(entry)
+                if (!file.exists()) null
+                else apiCall { postService.uploadPhoto(file.nameWithoutExtension, file.asRequestBody("image/jpeg".toMediaType())) }.url
+            }
+        }
+        val uploaded = withCover.copy(gallery = urls)
+        itemDao.insert(uploaded)
+        return uploaded
+    }
+
+    private suspend fun uploadCoverIfNeeded(post: Post): Post {
         if (post.photoPath.isBlank() || post.photo_url.isNotBlank()) return post
         val file = java.io.File(post.photoPath)
         if (!file.exists()) {
@@ -572,8 +603,13 @@ class PostRepository(
     suspend fun comments(postId: String): List<com.example.myandroidapp.todo.data.remote.Comment> =
         apiCall { postService.comments(postId) }
 
-    suspend fun addComment(postId: String, text: String): com.example.myandroidapp.todo.data.remote.Comment =
-        apiCall { postService.addComment(postId, mapOf("text" to text)) }
+    /** Comentariu nou; parentId = raspuns la acel comentariu. */
+    suspend fun addComment(postId: String, text: String, parentId: String = ""): com.example.myandroidapp.todo.data.remote.Comment =
+        apiCall { postService.addComment(postId, mapOf("text" to text, "parent_id" to parentId)) }
+
+    // id-ul postarii ale carei comentarii s-au schimbat (eveniment WebSocket "comments")
+    private val _commentChanges = kotlinx.coroutines.flow.MutableSharedFlow<String>(extraBufferCapacity = 16)
+    val commentChanges: kotlinx.coroutines.flow.SharedFlow<String> = _commentChanges
 
     suspend fun deleteComment(commentId: String) {
         val response = apiCall { postService.deleteComment(commentId) }
@@ -652,6 +688,7 @@ class PostRepository(
         // login facut offline: trecem intai sesiunea pe server (altfel serverul n-ar accepta nimic)
         if (!hasServerSession() && !ensureServerSession()) return@withLock false
         if (!hasServerSession()) return@withLock false
+        if (!syncBeforePosts()) return@withLock false
         // doar postarile contului conectat acum (nu ale altui cont de pe acelasi telefon)
         val ownerKey = currentOwnerKey()
         val pending = itemDao.getUnsyncedItems().filter { it.user_id == ownerKey }

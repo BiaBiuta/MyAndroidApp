@@ -30,6 +30,10 @@ data class Post(
     @field:LocalOnly var photoPath: String = "",
     // adresa pozei pe server ("/photos/<id>"), dupa ce a fost urcata (inaintea postarii)
     var photo_url: String = "",
+    // pozele in plus (max. 5): cai locale pana la sincronizare, apoi adrese "/photos/<id>"
+    var gallery: List<String> = emptyList(),
+    // calatoria (albumul) din care face parte postarea; "" = niciuna
+    var trip_id: String = "",
     var description: String = "",
     // 1..5 stele (0 = fara rating, la postarile vechi)
     var rating: Int = 0,
@@ -74,6 +78,15 @@ data class Post(
     val displayPhoto: String
         get() = photoPath.takeIf { it.isNotBlank() && java.io.File(it).exists() }
             ?: photo_url.ifBlank { photo }
+
+    /** Toate pozele postarii, in ordine: cea principala, apoi galeria (doar cele care exista). */
+    val allPhotos: List<String>
+        get() = listOf(displayPhoto).filter { it.isNotBlank() } +
+                gallery.filter { it.startsWith("/photos/") || it.startsWith("data:") || java.io.File(it).exists() }
+
+    /** Pozele din formular: prima devine poza principala, restul galeria. */
+    fun withPhotos(photos: List<String>): Post =
+        withPhoto(photos.firstOrNull().orEmpty()).copy(gallery = photos.drop(1).take(5))
 
     /** Aceeasi postare cu alta poza (valoarea vine din formular: fisier local, adresa server sau Base64). */
     fun withPhoto(value: String): Post = when {

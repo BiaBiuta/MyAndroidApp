@@ -1,4 +1,6 @@
 package com.example.myandroidapp.todo.ui.posts
+import androidx.compose.material.icons.filled.BookmarkBorder
+import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.FavoriteBorder
 import androidx.compose.material.icons.filled.Favorite
@@ -70,7 +72,12 @@ fun PostList(
     isOwn: (Post) -> Boolean = { false },
     emptyText: String = "Nicio postare de afișat.",
     // aprecierea din lista (null = utilizatorul curent nu poate aprecia: admin / vizitator)
-    onToggleLike: ((Post) -> Unit)? = null
+    onToggleLike: ((Post) -> Unit)? = null,
+    // numele autorului -> profilul lui
+    onAuthorClick: ((Post) -> Unit)? = null,
+    // postarile salvate si comutatorul (null = nu se pot salva)
+    savedIds: Set<String> = emptySet(),
+    onToggleSave: ((Post) -> Unit)? = null
 ) {
     if (posts.isEmpty()) {
         Box(modifier = modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
@@ -89,6 +96,9 @@ fun PostList(
                 onClick = { onPostClick(item.id) },
                 showSyncStatus = isOwn(item),
                 onToggleLike = onToggleLike?.let { toggle -> { toggle(item) } },
+                onAuthorClick = onAuthorClick?.let { open -> { open(item) } },
+                saved = item.id in savedIds,
+                onToggleSave = onToggleSave?.let { toggle -> { toggle(item) } },
                 actions = { actions(item) }
             )
         }
@@ -124,6 +134,9 @@ fun PostComponent(
     onClick: () -> Unit,
     showSyncStatus: Boolean = false,
     onToggleLike: (() -> Unit)? = null,
+    onAuthorClick: (() -> Unit)? = null,
+    saved: Boolean = false,
+    onToggleSave: (() -> Unit)? = null,
     actions: @Composable () -> Unit = {}
 ) {
     Card(
@@ -135,7 +148,21 @@ fun PostComponent(
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
         if (dep.displayPhoto.isNotBlank()) {
-            PostPhoto(photo = dep.displayPhoto, height = 190.dp, rounded = false)
+            Box {
+                PostPhoto(photo = dep.displayPhoto, height = 190.dp, rounded = false)
+                // mai multe poze: "+N" pe coperta
+                val more = dep.allPhotos.size - 1
+                if (more > 0) {
+                    androidx.compose.material3.Surface(
+                        color = Color.Black.copy(alpha = 0.6f),
+                        contentColor = Color.White,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.align(Alignment.BottomEnd).padding(8.dp)
+                    ) {
+                        Text("+$more poze", style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp))
+                    }
+                }
+            }
         }
         Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
             if (dep.title.isNotBlank()) {
@@ -192,14 +219,22 @@ fun PostComponent(
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))
-            Text(
-                text = listOf(authorName(dep), formatPostDate(dep.created_at)).filter { it.isNotBlank() }.joinToString(" · "),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // numele autorului duce la profilul lui
+                Text(
+                    text = authorName(dep),
+                    style = MaterialTheme.typography.labelMedium,
+                    color = if (onAuthorClick != null) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = if (onAuthorClick != null) Modifier.clickable(onClick = onAuthorClick) else Modifier
+                )
+                val date = formatPostDate(dep.created_at)
+                if (date.isNotBlank()) {
+                    Text(" · $date", style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
+            }
             // aprecieri si comentarii (doar postarile publicate au)
             if (dep.status == PostStatus.ACTIVE && !dep.isPrivate) {
-                SocialRow(post = dep, onToggleLike = onToggleLike)
+                SocialRow(post = dep, onToggleLike = onToggleLike, saved = saved, onToggleSave = onToggleSave)
             }
             // Actiunile permise rolului curent (publica / editeaza / sterge / raporteaza)
             actions()
@@ -339,8 +374,8 @@ fun PostDetail(post: Post, onPostClick: (id: String) -> Unit) {
 
 /** Aprecieri si comentarii: inima se poate apasa doar daca utilizatorul are voie sa aprecieze. */
 @Composable
-fun SocialRow(post: Post, onToggleLike: (() -> Unit)?) {
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(top = 6.dp)) {
+fun SocialRow(post: Post, onToggleLike: (() -> Unit)?, saved: Boolean = false, onToggleSave: (() -> Unit)? = null) {
+    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(top = 6.dp)) {
         val liked = post.liked_by_me
         val heart = if (liked) Icons.Default.Favorite else Icons.Default.FavoriteBorder
         val tint = if (liked) Color(0xFFE53935) else MaterialTheme.colorScheme.onSurfaceVariant
@@ -369,5 +404,15 @@ fun SocialRow(post: Post, onToggleLike: (() -> Unit)?) {
             style = MaterialTheme.typography.labelLarge,
             modifier = Modifier.semantics { contentDescription = "${post.comment_count} comentarii" }
         )
+        if (onToggleSave != null) {
+            Spacer(modifier = Modifier.weight(1f))
+            androidx.compose.material3.IconButton(onClick = onToggleSave, modifier = Modifier.size(36.dp)) {
+                Icon(
+                    if (saved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    contentDescription = if (saved) "Scoate din salvate" else "Salvează ca idee de călătorie",
+                    tint = if (saved) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
     }
 }

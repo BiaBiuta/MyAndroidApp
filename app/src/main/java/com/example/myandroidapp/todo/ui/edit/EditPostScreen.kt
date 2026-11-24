@@ -1,5 +1,6 @@
 package com.example.myandroidapp.todo.ui.edit
 
+import kotlinx.coroutines.flow.stateIn
 import android.util.Log
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.lifecycle.viewmodel.initializer
@@ -58,7 +60,8 @@ import com.example.myandroidapp.todo.data.SyncStatus
 import com.example.myandroidapp.todo.ui.post.LabeledSwitch
 import com.example.myandroidapp.todo.ui.post.LocationPickerField
 import com.example.myandroidapp.todo.data.Location
-import com.example.myandroidapp.todo.ui.post.PhotoPickerField
+import com.example.myandroidapp.todo.ui.post.GalleryPickerField
+import com.example.myandroidapp.todo.ui.post.TripPickerField
 import com.example.myandroidapp.todo.ui.post.RatingField
 import com.example.myandroidapp.todo.ui.post.VisitDateField
 import com.example.myandroidapp.todo.ui.post.writeResultMessage
@@ -73,7 +76,9 @@ data class EditPostUiState(
     val title: String = "",
     val description: String = "",
     // fotografia (Base64); se schimba doar daca utilizatorul alege alta
-    val photo: String = "",
+    // pozele (prima = principala): adrese de pe server sau fisiere noi, inca neurcate
+    val photos: List<String> = emptyList(),
+    val tripId: String = "",
     val rating: Int = 0,
     val visitDate: Long = 0,
     val place: String = "",
@@ -91,7 +96,8 @@ data class EditPostUiState(
  */
 class EditPostViewModel(
     private val postRepository: PostRepository,
-    private val roleRepository: RoleRepository
+    private val roleRepository: RoleRepository,
+    private val community: com.example.myandroidapp.community.data.CommunityRepository
 ) : ViewModel() {
 
     var uiState by mutableStateOf(EditPostUiState())
@@ -116,7 +122,8 @@ class EditPostViewModel(
                         post = post,
                         title = post.title,
                         description = post.description,
-                        photo = post.displayPhoto,
+                        photos = post.allPhotos,
+                        tripId = post.trip_id,
                         rating = post.rating,
                         visitDate = post.visit_date,
                         place = post.place,
@@ -139,9 +146,29 @@ class EditPostViewModel(
         if (value.length <= MAX_DESCRIPTION) uiState = uiState.copy(description = value, error = null)
     }
 
-    fun onPhotoPicked(photo: String?) {
-        uiState = if (photo == null) uiState.copy(error = "Imaginea nu a putut fi citită.")
-        else uiState.copy(photo = photo, error = null)
+    fun onPhotosChange(photos: List<String>) {
+        uiState = uiState.copy(photos = photos.take(6), error = null)
+    }
+
+    fun onPhotoError(message: String) {
+        uiState = uiState.copy(error = message)
+    }
+
+    /** Calatoriile proprii, pentru alegerea albumului. */
+    val trips = community.myTrips.stateIn(
+        viewModelScope, kotlinx.coroutines.flow.SharingStarted.WhileSubscribed(5_000), emptyList()
+    )
+
+    fun onTripChange(id: String) {
+        uiState = uiState.copy(tripId = id)
+    }
+
+    fun createTrip(title: String, startDate: Long, endDate: Long) {
+        if (title.isBlank()) return
+        viewModelScope.launch {
+            val trip = community.saveTrip(null, title, "", startDate, endDate)
+            uiState = uiState.copy(tripId = trip.id)
+        }
     }
 
     fun onRatingChange(value: Int) {
@@ -161,7 +188,8 @@ class EditPostViewModel(
     }
 
     // poza: fisier nou (se urca la sincronizare), cea de pe server sau cea veche (Base64)
-    private fun edited(original: Post) = original.withPhoto(uiState.photo).copy(
+    private fun edited(original: Post) = original.withPhotos(uiState.photos).copy(
+        trip_id = uiState.tripId,
         title = uiState.title.trim(),
         description = uiState.description.trim(),
         rating = uiState.rating,
@@ -222,7 +250,7 @@ class EditPostViewModel(
             initializer {
                 val app =
                     (this[ViewModelProvider.AndroidViewModelFactory.APPLICATION_KEY] as MyApplication)
-                EditPostViewModel(app.container.postRepository, app.container.roleRepository)
+                EditPostViewModel(app.container.postRepository, app.container.roleRepository, app.container.communityRepository)
             }
         }
     }
@@ -305,7 +333,20 @@ fun EditPostScreen(postId: String, onClose: (message: String?) -> Unit) {
                         supportingText = { Text("${state.description.length}/${EditPostViewModel.MAX_DESCRIPTION}") },
                         modifier = Modifier.fillMaxWidth()
                     )
-                    PhotoPickerField(photo = state.photo, enabled = !state.saving, onPhotoPicked = viewModel::onPhotoPicked)
+                    GalleryPickerField(
+                        photos = state.photos,
+                        enabled = !state.saving,
+                        onPhotosChange = viewModel::onPhotosChange,
+                        onError = viewModel::onPhotoError
+                    )
+                    val trips by viewModel.trips.collectAsStateWithLifecycle()
+                    TripPickerField(
+                        tripId = state.tripId,
+                        trips = trips,
+                        enabled = !state.saving,
+                        onTripChange = viewModel::onTripChange,
+                        onCreateTrip = viewModel::createTrip
+                    )
                     RatingField(rating = state.rating, enabled = !state.saving, onRatingChange = viewModel::onRatingChange)
                     VisitDateField(visitDate = state.visitDate, enabled = !state.saving, onDateChange = viewModel::onVisitDateChange)
                     LocationPickerField(

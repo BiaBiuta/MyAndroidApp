@@ -74,7 +74,7 @@ function createApp(options = {}) {
     if (user.role !== 'ADMIN') throw new ApiError(403, 'Doar administratorii pot face această operație.');
   }
 
-  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 5, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats', 'devices', 'photos', 'likes', 'comments'], time: new Date().toISOString() } }));
+  router.add('GET', '/health', () => ({ status: 200, body: { status: 'ok', version: 6, features: ['title', 'rating', 'visit_date', 'drafts', 'place', 'moderation', 'stats', 'devices', 'photos', 'likes', 'comments', 'replies', 'trips', 'follows', 'gallery'], time: new Date().toISOString() } }));
 
   router.add('POST', '/signup', ({ body }) => {
     const email = security.normalizeEmail(body.email);
@@ -214,7 +214,7 @@ function createApp(options = {}) {
     // poza urcata separat (PUT /photos/:id): postarea pastreaza doar adresa ei
     const photoUrl = typeof body.photo_url === 'string' ? body.photo_url : '';
     if (photoUrl && !PHOTO_URL.test(photoUrl)) throw new ApiError(400, 'Adresa pozei nu este validă.');
-    if (!title && !description && !photo && !photoUrl) {
+    if (!title && !description && !photo && !photoUrl && !(Array.isArray(body.gallery) && body.gallery.length)) {
       throw new ApiError(400, 'Postarea trebuie să aibă un titlu, un text sau o poză.');
     }
     if (title.length > 120) throw new ApiError(400, 'Titlul poate avea cel mult 120 de caractere.');
@@ -232,7 +232,13 @@ function createApp(options = {}) {
     if (!STATUSES.includes(status)) throw new ApiError(400, 'Starea postării trebuie să fie ACTIVE sau DRAFT.');
     const place = typeof body.place === 'string' ? body.place.trim() : '';
     if (place.length > 160) throw new ApiError(400, 'Numele locului poate avea cel mult 160 de caractere.');
-    return { title, description, photo, photo_url: photoUrl, place, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
+    // pozele in plus (galerie): doar adrese de poze urcate, maxim 5 (cu poza principala = 6)
+    const gallery = Array.isArray(body.gallery) ? body.gallery : [];
+    if (gallery.length > 5) throw new ApiError(400, 'O postare poate avea cel mult 6 poze.');
+    if (gallery.some((u) => typeof u !== 'string' || !PHOTO_URL.test(u))) throw new ApiError(400, 'Adresa unei poze nu este validă.');
+    const tripId = typeof body.trip_id === 'string' ? body.trip_id : '';
+    if (tripId && !ID_PATTERN.test(tripId)) throw new ApiError(400, 'Călătoria nu este validă.');
+    return { title, description, photo, photo_url: photoUrl, gallery, trip_id: tripId, place, location: normalizeLocation(body.location), rating, visit_date: visitDate, status };
   }
 
   /** Ce vede un utilizator: postarile active si neascunse; ale lui oricum; adminul si pe cele ascunse. */
@@ -254,6 +260,9 @@ function createApp(options = {}) {
   store.data.photos = store.data.photos || [];
   store.data.likes = store.data.likes || [];
   store.data.comments = store.data.comments || [];
+  store.data.commentLikes = store.data.commentLikes || [];
+  store.data.trips = store.data.trips || [];
+  store.data.follows = store.data.follows || [];
 
   /** Postarea, cum o vede un anumit utilizator: cu numarul de aprecieri / comentarii si daca a apreciat-o. */
   function forViewer(post, viewer) {
@@ -267,6 +276,16 @@ function createApp(options = {}) {
   }
 
   /** Poza urcata trebuie sa fie a autorului postarii. */
+  /** Toate pozele postarii trebuie sa fie ale autorului, iar calatoria (daca e) tot a lui. */
+  function requireOwnMedia(input, user) {
+    requireOwnPhoto(input.photo_url, user);
+    for (const url of input.gallery || []) requireOwnPhoto(url, user);
+    if (input.trip_id) {
+      const trip = store.data.trips.find((t) => t.id === input.trip_id && !t.deleted);
+      if (!trip || trip.owner_id !== String(user.id)) throw new ApiError(400, 'Călătoria nu există. Sincronizați întâi călătoria.');
+    }
+  }
+
   function requireOwnPhoto(photoUrl, user) {
     if (!photoUrl) return;
     const id = photoUrl.slice('/photos/'.length);
@@ -314,7 +333,7 @@ function createApp(options = {}) {
   }
 
   function createPost(id, input, user, updatedAt) {
-    requireOwnPhoto(input.photo_url, user);
+    requireOwnMedia(input, user);
     const now = new Date().toISOString();
     const post = {
       id,
@@ -387,7 +406,7 @@ function createApp(options = {}) {
         });
       }
       const input = validatePostInput({ ...existing, ...body });
-      requireOwnPhoto(input.photo_url, user);
+      requireOwnMedia(input, user);
       const updated = { ...existing, ...input, updated_at: updatedAt };
       store.replacePost(updated);
       broadcastPost('updated', updated);
@@ -410,7 +429,9 @@ function createApp(options = {}) {
       store.deletePost(existing.id, { byModerator: !isOwner });
       // aprecierile si comentariile postarii dispar odata cu ea
       store.data.likes = store.data.likes.filter((l) => l.post_id !== existing.id);
+      const goneComments = new Set(store.data.comments.filter((c) => c.post_id === existing.id).map((c) => c.id));
       store.data.comments = store.data.comments.filter((c) => c.post_id !== existing.id);
+      store.data.commentLikes = store.data.commentLikes.filter((l) => !goneComments.has(l.comment_id));
       store.save();
       broadcastPost('deleted', existing);
       return { status: 204 };
@@ -472,7 +493,7 @@ function createApp(options = {}) {
       const photo = store.data.photos.find((p) => p.id === params.id);
       const url = `/photos/${params.id}`;
       const allowed = photo && (photo.owner_id === String(user.id) ||
-        store.data.posts.some((p) => p.photo_url === url && canSee(p, user)));
+        store.data.posts.some((p) => (p.photo_url === url || (p.gallery || []).includes(url)) && canSee(p, user)));
       if (!allowed) throw new ApiError(404, 'Poza nu există.');
       let data;
       try {
@@ -536,13 +557,41 @@ function createApp(options = {}) {
     { auth: true },
   );
 
+  /**
+   * Comentariile, ca intr-o retea sociala: raspunsuri (un nivel), aprecieri, editare ("editat"),
+   * stergere de catre autor / autorul postarii / admin. Orice schimbare trimite prin WebSocket
+   * evenimentul "comments" celor care pot vedea postarea, ca ecranul deschis sa se actualizeze.
+   */
   function publicComment(comment, viewer, post) {
+    const likes = store.data.commentLikes.filter((l) => l.comment_id === comment.id);
+    const mine = Boolean(viewer) && comment.user_id === String(viewer.id);
     return {
       ...comment,
-      // autorul comentariului, autorul postarii si adminul pot sterge comentariul
-      can_delete: Boolean(viewer) && (comment.user_id === String(viewer.id) ||
-        post.user_id === String(viewer.id) || viewer.role === 'ADMIN'),
+      parent_id: comment.parent_id || '',
+      edited_at: comment.edited_at || '',
+      like_count: likes.length,
+      liked_by_me: Boolean(viewer) && likes.some((l) => l.user_id === String(viewer.id)),
+      can_edit: mine,
+      can_delete: mine || (Boolean(viewer) && (post.user_id === String(viewer.id) || viewer.role === 'ADMIN')),
     };
+  }
+
+  function broadcastComments(post) {
+    hub.broadcastWith((viewer) => (canSee(post, viewer) ? { event: 'comments', payload: { item: { id: post.id } } } : null));
+  }
+
+  function commentText(body) {
+    const text = typeof body.text === 'string' ? body.text.trim() : '';
+    if (!text) throw new ApiError(400, 'Comentariul nu poate fi gol.');
+    if (text.length > 500) throw new ApiError(400, 'Comentariul poate avea cel mult 500 de caractere.');
+    return text;
+  }
+
+  function findCommentOr404(id, user) {
+    const comment = store.data.comments.find((c) => c.id === id);
+    const post = comment && store.findPost(comment.post_id);
+    if (!comment || !post || !canSee(post, user)) throw new ApiError(404, 'Comentariul nu mai există.');
+    return { comment, post };
   }
 
   router.add(
@@ -565,12 +614,18 @@ function createApp(options = {}) {
     ({ params, body, user }) => {
       requireMember(user);
       const post = findPublicPostOr404(params.id, user);
-      const text = typeof body.text === 'string' ? body.text.trim() : '';
-      if (!text) throw new ApiError(400, 'Comentariul nu poate fi gol.');
-      if (text.length > 500) throw new ApiError(400, 'Comentariul poate avea cel mult 500 de caractere.');
+      const text = commentText(body);
+      // raspuns la un comentariu: mereu la comentariul de pe primul nivel (fire de discutie simple)
+      let parentId = '';
+      if (typeof body.parent_id === 'string' && body.parent_id) {
+        const parent = store.data.comments.find((c) => c.id === body.parent_id && c.post_id === post.id);
+        if (!parent) throw new ApiError(404, 'Comentariul la care răspundeți nu mai există.');
+        parentId = parent.parent_id || parent.id;
+      }
       const comment = {
         id: crypto.randomUUID(),
         post_id: post.id,
+        parent_id: parentId,
         user_id: String(user.id),
         author: user.email.split('@')[0],
         text,
@@ -579,7 +634,23 @@ function createApp(options = {}) {
       store.data.comments.push(comment);
       store.save();
       broadcastPost('updated', post);
+      broadcastComments(post);
       return { status: 201, body: publicComment(comment, user, post) };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'PATCH',
+    '/comments/:id',
+    ({ params, body, user }) => {
+      const { comment, post } = findCommentOr404(params.id, user);
+      if (comment.user_id !== String(user.id)) throw new ApiError(403, 'Puteți edita doar comentariile proprii.');
+      comment.text = commentText(body);
+      comment.edited_at = new Date().toISOString();
+      store.save();
+      broadcastComments(post);
+      return { status: 200, body: publicComment(comment, user, post) };
     },
     { auth: true },
   );
@@ -588,19 +659,194 @@ function createApp(options = {}) {
     'DELETE',
     '/comments/:id',
     ({ params, user }) => {
-      const comment = store.data.comments.find((c) => c.id === params.id);
-      const post = comment && store.findPost(comment.post_id);
-      if (!comment || !post || !canSee(post, user)) throw new ApiError(404, 'Comentariul nu mai există.');
+      const { comment, post } = findCommentOr404(params.id, user);
       if (!publicComment(comment, user, post).can_delete) {
         throw new ApiError(403, 'Puteți șterge doar comentariile proprii sau pe cele de la postările voastre.');
       }
-      store.data.comments = store.data.comments.filter((c) => c.id !== comment.id);
+      // un comentariu sters ia cu el si raspunsurile lui
+      const removed = new Set(store.data.comments.filter((c) => c.id === comment.id || c.parent_id === comment.id).map((c) => c.id));
+      store.data.comments = store.data.comments.filter((c) => !removed.has(c.id));
+      store.data.commentLikes = store.data.commentLikes.filter((l) => !removed.has(l.comment_id));
       store.save();
       broadcastPost('updated', post);
+      broadcastComments(post);
       return { status: 204 };
     },
     { auth: true },
   );
+
+  for (const method of ['PUT', 'DELETE']) {
+    router.add(
+      method,
+      '/comments/:id/like',
+      ({ params, user }) => {
+        requireMember(user);
+        const { comment, post } = findCommentOr404(params.id, user);
+        const has = store.data.commentLikes.some((l) => l.comment_id === comment.id && l.user_id === String(user.id));
+        if (method === 'PUT' && !has) store.data.commentLikes.push({ comment_id: comment.id, user_id: String(user.id) });
+        if (method === 'DELETE' && has) {
+          store.data.commentLikes = store.data.commentLikes.filter((l) => !(l.comment_id === comment.id && l.user_id === String(user.id)));
+        }
+        if ((method === 'PUT') !== has) {
+          store.save();
+          broadcastComments(post);
+        }
+        return { status: 200, body: publicComment(comment, user, post) };
+      },
+      { auth: true },
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Calatorii (albume): grupeaza postarile unui utilizator. Create si offline pe telefon
+  // (id = UUID de pe telefon), trimise cu PUT (upsert), sterse cu DELETE.
+  // ---------------------------------------------------------------------------
+
+  function validTrip(body) {
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    if (!title) throw new ApiError(400, 'Călătoria trebuie să aibă un nume.');
+    if (title.length > 80) throw new ApiError(400, 'Numele călătoriei poate avea cel mult 80 de caractere.');
+    const description = typeof body.description === 'string' ? body.description.trim() : '';
+    if (description.length > 1000) throw new ApiError(400, 'Descrierea poate avea cel mult 1000 de caractere.');
+    const start = Number(body.start_date) || 0;
+    const end = Number(body.end_date) || 0;
+    if (start < 0 || end < 0 || (start && end && end < start)) throw new ApiError(400, 'Data de sfârșit nu poate fi înaintea celei de început.');
+    return { title, description, start_date: start, end_date: end };
+  }
+
+  /** Calatoria + cate postari publice are si cate locuri, pentru cine o priveste. */
+  function publicTrip(trip, viewer) {
+    const posts = store.data.posts.filter((p) => p.trip_id === trip.id && canSee(p, viewer));
+    return {
+      id: trip.id,
+      user_id: trip.owner_id,
+      title: trip.title,
+      description: trip.description,
+      start_date: trip.start_date,
+      end_date: trip.end_date,
+      created_at: trip.created_at,
+      updated_at: trip.updated_at,
+      post_count: posts.length,
+      cover: (posts.find((p) => p.photo_url) || {}).photo_url || '',
+    };
+  }
+
+  router.add(
+    'PUT',
+    '/trips/:id',
+    ({ params, body, user }) => {
+      requirePublisher(user);
+      if (!ID_PATTERN.test(params.id)) throw new ApiError(400, 'Identificator de călătorie invalid.');
+      const existing = store.data.trips.find((t) => t.id === params.id);
+      if (existing && existing.owner_id !== String(user.id)) throw new ApiError(404, 'Călătoria nu există.');
+      if (existing && existing.deleted) throw new ApiError(410, 'Călătoria a fost ștearsă.');
+      const input = validTrip(body);
+      const now = new Date().toISOString();
+      if (existing) {
+        Object.assign(existing, input, { updated_at: now });
+      } else {
+        store.data.trips.push({ id: params.id, owner_id: String(user.id), ...input, created_at: now, updated_at: now });
+      }
+      store.save();
+      const trip = store.data.trips.find((t) => t.id === params.id);
+      return { status: existing ? 200 : 201, body: publicTrip(trip, user) };
+    },
+    { auth: true },
+  );
+
+  router.add(
+    'DELETE',
+    '/trips/:id',
+    ({ params, user }) => {
+      const trip = store.data.trips.find((t) => t.id === params.id);
+      if (!trip || trip.deleted) return { status: 204 };
+      if (trip.owner_id !== String(user.id)) throw new ApiError(404, 'Călătoria nu există.');
+      trip.deleted = true;
+      // postarile raman, doar nu mai apartin calatoriei
+      for (const post of store.data.posts.filter((p) => p.trip_id === trip.id)) {
+        const updated = { ...post, trip_id: '' };
+        store.replacePost(updated);
+        broadcastPost('updated', updated);
+      }
+      store.save();
+      return { status: 204 };
+    },
+    { auth: true },
+  );
+
+  // ---------------------------------------------------------------------------
+  // Profilul altor calatori si urmarirea lor
+  // ---------------------------------------------------------------------------
+
+  function publicUserOr404(id) {
+    const user = store.findUserById(Number(id)) || store.findUserById(id);
+    if (!user || user.role === 'ADMIN') throw new ApiError(404, 'Utilizatorul nu există.');
+    return user;
+  }
+
+  /** Profilul public: doar numele afisat (nu adresa de e-mail) si statistici din postarile vizibile. */
+  function publicProfile(person, viewer) {
+    const id = String(person.id);
+    const posts = store.data.posts.filter((p) => p.user_id === id && p.status !== 'DRAFT' && canSee(p, viewer));
+    const rated = posts.filter((p) => p.rating > 0);
+    return {
+      id,
+      name: person.provider === PROVIDERS.ANONYMOUS ? 'Vizitator' : person.email.split('@')[0],
+      provider: person.provider,
+      created_at: person.createdAt,
+      post_count: posts.length,
+      place_count: new Set(posts.map((p) => (p.place || '').trim().toLowerCase()).filter(Boolean)).size,
+      average_rating: rated.length ? rated.reduce((sum, p) => sum + p.rating, 0) / rated.length : 0,
+      likes_received: store.data.likes.filter((l) => posts.some((p) => p.id === l.post_id)).length,
+      trip_count: store.data.trips.filter((t) => t.owner_id === id && !t.deleted).length,
+      followers: store.data.follows.filter((f) => f.followee_id === id).length,
+      following: store.data.follows.filter((f) => f.follower_id === id).length,
+      followed_by_me: store.data.follows.some((f) => f.follower_id === String(viewer.id) && f.followee_id === id),
+      is_me: id === String(viewer.id),
+    };
+  }
+
+  router.add('GET', '/users/:id/profile', ({ params, user }) => ({
+    status: 200,
+    body: publicProfile(publicUserOr404(params.id), user),
+  }), { auth: true });
+
+  router.add('GET', '/users/:id/trips', ({ params, user }) => {
+    const person = publicUserOr404(params.id);
+    const trips = store.data.trips
+      .filter((t) => t.owner_id === String(person.id) && !t.deleted)
+      .map((t) => publicTrip(t, user))
+      // ale altora: doar calatoriile cu postari publice
+      .filter((t) => String(person.id) === String(user.id) || t.post_count > 0)
+      .sort((a, b) => (b.start_date || 0) - (a.start_date || 0));
+    return { status: 200, body: trips };
+  }, { auth: true });
+
+  router.add('GET', '/me/following', ({ user }) => ({
+    status: 200,
+    body: store.data.follows.filter((f) => f.follower_id === String(user.id)).map((f) => f.followee_id),
+  }), { auth: true });
+
+  for (const method of ['PUT', 'DELETE']) {
+    router.add(
+      method,
+      '/users/:id/follow',
+      ({ params, user }) => {
+        requireMember(user);
+        const person = publicUserOr404(params.id);
+        const id = String(person.id);
+        if (id === String(user.id)) throw new ApiError(400, 'Nu vă puteți urmări propriul profil.');
+        const has = store.data.follows.some((f) => f.follower_id === String(user.id) && f.followee_id === id);
+        if (method === 'PUT' && !has) store.data.follows.push({ follower_id: String(user.id), followee_id: id, created_at: new Date().toISOString() });
+        if (method === 'DELETE' && has) {
+          store.data.follows = store.data.follows.filter((f) => !(f.follower_id === String(user.id) && f.followee_id === id));
+        }
+        store.save();
+        return { status: 200, body: publicProfile(person, user) };
+      },
+      { auth: true },
+    );
+  }
 
   // ---------------------------------------------------------------------------
   // Profil: schimbarea parolei (conturile cu e-mail si parola)
