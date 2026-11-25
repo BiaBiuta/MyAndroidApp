@@ -20,9 +20,7 @@ import androidx.lifecycle.lifecycleScope
 import com.example.myandroidapp.MyAppNavHost
 import com.example.myandroidapp.MyApplication
 import com.example.myandroidapp.core.TAG
-import com.example.myandroidapp.sensor.DeviceSensors
 import com.example.myandroidapp.ui.theme.MyAppTheme
-import com.example.myapp3.ProximitySensor
 
 import com.google.accompanist.permissions.ExperimentalPermissionsApi
 import com.ilazar.myapp3.util.RequirePermissions

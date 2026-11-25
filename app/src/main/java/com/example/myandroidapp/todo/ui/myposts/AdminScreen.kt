@@ -91,8 +91,8 @@ fun AdminScreen(onBack: () -> Unit) {
     // 0 = Postari (moderare), 1 = Raportari, 2 = Utilizatori
     var tab by rememberSaveable { mutableIntStateOf(0) }
     var postToDelete by remember { mutableStateOf<Post?>(null) }
-    // Dialogul de raspuns: postarea + decizia (true = sterge postarea, false = respinge)
-    var answering by remember { mutableStateOf<Pair<ReportedPost, Boolean>?>(null) }
+    // Dialogul de raspuns: postarea + decizia (sterge / ascunde / respinge)
+    var answering by remember { mutableStateOf<Pair<ReportedPost, ReportDecision>?>(null) }
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(viewModel.message) {
@@ -163,8 +163,9 @@ fun AdminScreen(onBack: () -> Unit) {
                     reportsByPost = reportsByPost,
                     users = users,
                     enabled = !viewModel.busy && isOnline,
-                    onDelete = { answering = it to true },
-                    onDismiss = { answering = it to false }
+                    onDelete = { answering = it to ReportDecision.DELETE },
+                    onHide = { answering = it to ReportDecision.HIDE },
+                    onDismiss = { answering = it to ReportDecision.DISMISS }
                 )
                 else -> UsersList(
                     users = users,
@@ -197,14 +198,17 @@ fun AdminScreen(onBack: () -> Unit) {
         )
     }
 
-    answering?.let { (item, delete) ->
+    answering?.let { (item, decision) ->
         AnswerReportDialog(
             reported = item,
-            deletePost = delete,
+            decision = decision,
             onDismiss = { answering = null },
             onConfirm = { reply, authorMessage ->
-                if (delete) viewModel.deleteReportedPost(item, reply, authorMessage)
-                else viewModel.dismissReports(item, reply)
+                when (decision) {
+                    ReportDecision.DELETE -> viewModel.deleteReportedPost(item, reply, authorMessage)
+                    ReportDecision.HIDE -> viewModel.hideReportedPost(item, reply, authorMessage)
+                    ReportDecision.DISMISS -> viewModel.dismissReports(item, reply)
+                }
                 answering = null
             }
         )
@@ -215,27 +219,52 @@ fun AdminScreen(onBack: () -> Unit) {
  * Adminul scrie raspunsul pentru cei care au raportat si, la stergere,
  * mesajul pentru autorul postarii.
  */
+/** Ce decide adminul pentru o postare raportata. */
+private enum class ReportDecision { DELETE, HIDE, DISMISS }
+
 @Composable
 private fun AnswerReportDialog(
     reported: ReportedPost,
-    deletePost: Boolean,
+    decision: ReportDecision,
     onDismiss: () -> Unit,
     onConfirm: (reply: String, authorMessage: String) -> Unit
 ) {
+    // la stergere si la ascundere, autorul primeste si el un mesaj
+    val deletePost = decision != ReportDecision.DISMISS
     var reply by rememberSaveable {
         mutableStateOf(
-            if (deletePost) AdminViewModel.DEFAULT_RESOLVED_REPLY else AdminViewModel.DEFAULT_REJECTED_REPLY
+            when (decision) {
+                ReportDecision.DELETE -> AdminViewModel.DEFAULT_RESOLVED_REPLY
+                ReportDecision.HIDE -> AdminViewModel.DEFAULT_HIDDEN_REPLY
+                ReportDecision.DISMISS -> AdminViewModel.DEFAULT_REJECTED_REPLY
+            }
         )
     }
-    var authorMessage by rememberSaveable { mutableStateOf(AdminViewModel.DEFAULT_AUTHOR_MESSAGE) }
+    var authorMessage by rememberSaveable {
+        mutableStateOf(
+            if (decision == ReportDecision.HIDE) AdminViewModel.DEFAULT_HIDDEN_AUTHOR_MESSAGE
+            else AdminViewModel.DEFAULT_AUTHOR_MESSAGE
+        )
+    }
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (deletePost) "Șterge postarea" else "Respinge raportările") },
+        title = {
+            Text(
+                when (decision) {
+                    ReportDecision.DELETE -> "Șterge postarea"
+                    ReportDecision.HIDE -> "Ascunde postarea"
+                    ReportDecision.DISMISS -> "Respinge raportările"
+                }
+            )
+        },
         text = {
             Column {
                 Text(
-                    if (deletePost) "Postarea va fi eliminată, iar raportările marcate ca rezolvate."
-                    else "Postarea rămâne, iar raportările sunt marcate ca respinse.",
+                    when (decision) {
+                        ReportDecision.DELETE -> "Postarea va fi eliminată pentru toți, iar raportările marcate ca rezolvate."
+                        ReportDecision.HIDE -> "Postarea dispare din feed. Autorul o păstrează (o vede doar el), dar nu o mai poate publica. Doar un administrator o poate reafișa."
+                        ReportDecision.DISMISS -> "Postarea rămâne, iar raportările sunt marcate ca respinse."
+                    },
                     style = MaterialTheme.typography.bodyMedium
                 )
                 Spacer(Modifier.height(12.dp))
@@ -267,7 +296,13 @@ private fun AnswerReportDialog(
                 onClick = { onConfirm(reply, authorMessage) },
                 enabled = reply.isNotBlank() && (!deletePost || authorMessage.isNotBlank())
             ) {
-                Text(if (deletePost) "Șterge și trimite" else "Respinge și trimite")
+                Text(
+                    when (decision) {
+                        ReportDecision.DELETE -> "Șterge și trimite"
+                        ReportDecision.HIDE -> "Ascunde și trimite"
+                        ReportDecision.DISMISS -> "Respinge și trimite"
+                    }
+                )
             }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Anulează") } }
@@ -288,6 +323,7 @@ private fun ReportedPostsList(
     users: List<UserEntity>,
     enabled: Boolean,
     onDelete: (ReportedPost) -> Unit,
+    onHide: (ReportedPost) -> Unit,
     onDismiss: (ReportedPost) -> Unit
 ) {
     if (reported.isEmpty()) {
@@ -397,8 +433,15 @@ private fun ReportedPostsList(
                     Spacer(Modifier.height(12.dp))
                     Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
                         TextButton(onClick = { onDismiss(item) }, enabled = enabled) { Text("Respinge") }
-                        Spacer(Modifier.width(8.dp))
-                        Button(onClick = { onDelete(item) }, enabled = enabled) { Text("Șterge postarea") }
+                        Spacer(Modifier.width(4.dp))
+                        // varianta blanda: scoasa din feed, autorul o pastreaza dar nu o mai poate publica
+                        OutlinedButton(onClick = { onHide(item) }, enabled = enabled) {
+                            Icon(Icons.Default.VisibilityOff, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Ascunde")
+                        }
+                        Spacer(Modifier.width(4.dp))
+                        Button(onClick = { onDelete(item) }, enabled = enabled) { Text("Șterge") }
                     }
                 }
             }

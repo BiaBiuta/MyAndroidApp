@@ -24,7 +24,7 @@ object SecureStore {
     private const val ANDROID_KEYSTORE = "AndroidKeyStore"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val PREFIX = "enc1:"
-
+    /**generare de cheie AES pe 256 de biti  configurata pentru criptare/decriptare in modul GCM*/
     @Synchronized
     private fun key(): SecretKey {
         val keyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
@@ -43,11 +43,13 @@ object SecureStore {
         )
         return generator.generateKey()
     }
-
+    /**verifica daca e criptata deci incepe cu acest prefix enc1: */
     fun isEncrypted(value: String) = value.startsWith(PREFIX)
 
     fun encrypt(plain: String): String {
         if (plain.isEmpty() || isEncrypted(plain)) return plain
+        //in modul gcm se genereaza un iv random la fiecare criptare,
+        // care trebuie pastrat pentru decriptare
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, key())
         val cipherText = cipher.doFinal(plain.toByteArray(Charsets.UTF_8))

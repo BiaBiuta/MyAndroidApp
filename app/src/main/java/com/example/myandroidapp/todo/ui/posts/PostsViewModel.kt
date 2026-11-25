@@ -253,6 +253,33 @@ class PostsViewModel(
     /** Doar USER (nu admin, nu vizitator) poate raporta postarile altora. */
     fun canReport(post: Post, user: UserEntity?): Boolean = PostPermissions.canReport(post, user)
 
+    /** ADMIN, postarea altcuiva: poate s-o ascunda din feed / s-o reafiseze. */
+    fun canModerate(post: Post, user: UserEntity?): Boolean =
+        PostPermissions.canModerate(user) && post.user_id != user?.ownerKey
+
+    /**
+     * ADMIN: ascunde / reafiseaza o postare. Ascunsa, ea dispare din feed-ul celorlalti; autorul o
+     * pastreaza, dar nu o mai poate publica. Doar cu conexiune (schimba ce vad toti).
+     */
+    fun toggleHidden(post: Post) {
+        viewModelScope.launch {
+            val user = roleRepository.currentUserOnce()
+            if (!canModerate(post, user)) {
+                message = "Doar administratorii pot ascunde postările altora."
+                return@launch
+            }
+            message = try {
+                postRepository.setHidden(post.id, !post.hidden)
+                if (post.hidden) "Postarea este din nou vizibilă tuturor."
+                else "Postarea a fost ascunsă din feed. Autorul o vede în continuare, dar nu o mai poate publica."
+            } catch (e: Exception) {
+                Log.w(TAG, "toggle hidden failed", e)
+                if (e is OfflineException) "Ești offline. Moderarea are nevoie de conexiune la server."
+                else e.toUserMessage("Vizibilitatea postării nu a putut fi schimbată.")
+            }
+        }
+    }
+
     fun deletePost(post: Post) {
         viewModelScope.launch {
             val user = roleRepository.currentUserOnce()

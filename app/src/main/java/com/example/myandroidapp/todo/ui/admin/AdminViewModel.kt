@@ -147,6 +147,23 @@ class AdminViewModel(
             null
         }
 
+    /**
+     * Da dreptate raportarilor fara sa stearga: postarea iese din feed, autorul o pastreaza
+     * (nu o mai poate publica), cei care au raportat vad [reply], autorul primeste [authorMessage].
+     */
+    fun hideReportedPost(reported: ReportedPost, reply: String, authorMessage: String) =
+        runAdmin("Postarea a fost ascunsă din feed. Autorul o păstrează și a primit mesajul.") {
+            val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
+            postRepository.resolveReportsByHiding(
+                postId = reported.post.id,
+                adminId = admin.email,
+                reply = reply.trim().ifBlank { DEFAULT_HIDDEN_REPLY },
+                authorMessage = authorMessage.trim().ifBlank { DEFAULT_HIDDEN_AUTHOR_MESSAGE }
+            )
+            refreshStats()
+            null
+        }
+
     /** Respinge raportarile: postarea ramane, iar cei care au raportat vad mesajul adminului. */
     fun dismissReports(reported: ReportedPost, reply: String) = runAdmin("Raportările au fost respinse.") {
         val admin = userRepository.currentUserOnce() ?: return@runAdmin "Sesiune expirată."
@@ -170,6 +187,9 @@ class AdminViewModel(
     companion object {
         const val DEFAULT_RESOLVED_REPLY = "Mulțumim! Postarea încălca regulile și a fost eliminată."
         const val DEFAULT_REJECTED_REPLY = "Am verificat postarea și nu încalcă regulile comunității."
+        const val DEFAULT_HIDDEN_REPLY = "Mulțumim! Postarea a fost scoasă din feed."
+        const val DEFAULT_HIDDEN_AUTHOR_MESSAGE =
+            "Postarea ta a fost ascunsă de un administrator după ce a fost raportată. O vezi doar tu și nu mai poate fi publicată."
         const val DEFAULT_AUTHOR_MESSAGE =
             "Postarea ta a fost ștearsă de un administrator deoarece a fost raportată și încălca regulile comunității."
 

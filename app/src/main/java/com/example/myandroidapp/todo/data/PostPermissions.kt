@@ -15,6 +15,7 @@ import com.example.myandroidapp.auth.data.local.isRegularUser
  *  - Vizitator anonim: doar citeste feed-ul public.
  *  - Un cont blocat nu mai poate modifica nimic.
  */
+//exista doar o instanta globala si functiile pot sa fie apelate de oriunde
 object PostPermissions {
 
     /** Cine vede postarea in feed: ciornele doar autorul; cele ascunse de moderator autorul si adminii. */
@@ -23,11 +24,11 @@ object PostPermissions {
         if (post.isPrivate) return mine
         return (post.status != PostStatus.DRAFT || mine) && (!post.hidden || mine || user?.isAdmin == true)
     }
-
+    /**cine poate publica - doar utilizatorul */
     fun canPublish(user: UserEntity?): Boolean =
         user != null && user.isRegularUser && !user.isBlocked
 
-    /** Doar autorul isi poate edita postarea (adminul modereaza, nu rescrie postarile altora). */
+    /** Doar autorul isi poate edita postarea  */
     fun canEdit(post: Post, user: UserEntity?): Boolean =
         user != null && !user.isBlocked && !user.isGuest && isOwner(post, user)
 

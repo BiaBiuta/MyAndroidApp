@@ -169,6 +169,25 @@ class PostRepository(
     }
 
     /**
+     * Adminul da dreptate raportarilor, dar fara stergere: postarea e ASCUNSA (dispare din feed-ul
+     * celorlalti), autorul o pastreaza si o vede cu insigna "Ascunsă de moderator", dar nu o mai
+     * poate face publica (serverul nu accepta campul `hidden` de la autor; doar un admin o reafiseaza).
+     * Cei care au raportat primesc [reply], autorul primeste [authorMessage].
+     */
+    suspend fun resolveReportsByHiding(postId: String, adminId: String, reply: String, authorMessage: String) {
+        val notice = removalNotice(postId, adminId, authorMessage)
+        setHidden(postId, true)
+        moderationDao.answerReports(
+            postId = postId,
+            status = ReportStatus.RESOLVED,
+            reply = reply,
+            adminId = adminId,
+            resolvedAt = System.currentTimeMillis()
+        )
+        notice?.let { moderationDao.insertNotice(it) }
+    }
+
+    /**
      * Sterge o postare.
      *  - autorul: offline-first. Postarea dispare imediat din liste ("tombstone", isDeleted) si se
      *    sterge pe server acum sau, fara conexiune, la urmatoarea sincronizare;

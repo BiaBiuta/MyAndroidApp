@@ -45,6 +45,7 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Fingerprint
 import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Flag
 import androidx.compose.material.icons.filled.Luggage
 import androidx.compose.material.icons.filled.PhotoLibrary
@@ -333,7 +334,10 @@ fun PostsScreen(
                             onEdit = { onEditPost(post.id) },
                             canPublish = post.status == com.example.myandroidapp.todo.data.PostStatus.DRAFT &&
                                     itemsViewModel.canEdit(post, currentUser),
-                            onPublish = { itemsViewModel.publishDraft(post) }
+                            onPublish = { itemsViewModel.publishDraft(post) },
+                            canModerate = itemsViewModel.canModerate(post, currentUser),
+                            hidden = post.hidden,
+                            onToggleHidden = { itemsViewModel.toggleHidden(post) }
                         )
                     }
                 )
@@ -700,9 +704,13 @@ fun PostRoleActions(
     onEdit: () -> Unit = {},
     // ciorna proprie: "Publică" direct din lista, fara editare
     canPublish: Boolean = false,
-    onPublish: () -> Unit = {}
+    onPublish: () -> Unit = {},
+    // ADMIN: ascunde / reafiseaza postarea altcuiva (varianta blanda a stergerii)
+    canModerate: Boolean = false,
+    hidden: Boolean = false,
+    onToggleHidden: () -> Unit = {}
 ) {
-    if (!canDelete && !canReport && !canEdit && !canPublish) return
+    if (!canDelete && !canReport && !canEdit && !canPublish && !canModerate) return
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End
@@ -727,6 +735,17 @@ fun PostRoleActions(
                 Icon(Icons.Default.Edit, contentDescription = null, modifier = Modifier.size(18.dp))
                 Spacer(modifier = Modifier.width(4.dp))
                 Text("Editează")
+            }
+        }
+        if (canModerate) {
+            TextButton(onClick = onToggleHidden) {
+                Icon(
+                    if (hidden) Icons.Default.Visibility else Icons.Default.VisibilityOff,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text(if (hidden) "Reafișează" else "Ascunde")
             }
         }
         if (canDelete) {
