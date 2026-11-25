@@ -1,6 +1,6 @@
 package com.example.myandroidapp.profile
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -205,7 +205,7 @@ class ProfileViewModel(
                     passwordChanged = true
                     message = "Parola a fost schimbată."
                 } catch (e: Exception) {
-                    Log.w("ProfileViewModel", "password change failed", e)
+                    SafeLog.w("ProfileViewModel", "password change failed", e)
                     passwordError = if (e is OfflineException) "Schimbarea parolei are nevoie de conexiune la server."
                     else e.toUserMessage("Parola nu a putut fi schimbată.")
                 }
@@ -329,6 +329,9 @@ fun ProfileScreen(onBack: () -> Unit, onLogout: () -> Unit) {
                 HorizontalDivider()
                 PasswordSection(viewModel, user.email)
             }
+
+            // ----- demo pentru "Secure logging" (doar in build-ul de debug) -----
+            user?.let { com.example.myandroidapp.core.logging.LogDemoCard(email = it.email) }
 
             HorizontalDivider()
             OutlinedButton(onClick = onLogout, modifier = Modifier.fillMaxWidth()) {

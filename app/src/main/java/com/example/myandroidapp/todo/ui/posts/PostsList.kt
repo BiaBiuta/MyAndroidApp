@@ -7,7 +7,7 @@ import androidx.compose.material.icons.filled.Favorite
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.util.Base64
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -366,7 +366,7 @@ fun PostPhoto(
 @Composable
 fun PostDetail(post: Post, onPostClick: (id: String) -> Unit) {
     //TODO maps-ul
-    Log.d("PostDetail","recompose id = ${post.id}")
+    SafeLog.d("PostDetail","recompose id = ${post.id}")
     Row{
         ClickableText(text= AnnotatedString(post.id)) { }
     }

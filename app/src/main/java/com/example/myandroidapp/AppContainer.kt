@@ -1,7 +1,7 @@
 package com.example.myapplication.core
 
 import android.content.Context
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.datastore.preferences.preferencesDataStore
 import com.example.myandroidapp.auth.data.AuthRepository
 import com.example.myandroidapp.auth.data.RoleRepository
@@ -33,7 +33,7 @@ val Context.userPreferencesDataStore by preferencesDataStore(
 
 class AppContainer(val context: Context) {
     init {
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
     }
     //it implement in a dynamic mode methods from interface
     private val postService: PostService = Api.retrofit.create(PostService::class.java)

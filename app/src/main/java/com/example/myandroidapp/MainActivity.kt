@@ -3,7 +3,7 @@ package com.example.myapp
 import android.Manifest
 import android.os.Build
 import android.os.Bundle
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.annotation.RequiresApi
@@ -35,7 +35,7 @@ class MainActivity : FragmentActivity() {
         setContentView(
             ComposeView(this).apply {
                 setContent {
-                    Log.d(TAG, "onCreate")
+                    SafeLog.d(TAG, "onCreate")
                     MyApp {
                         MyAppNavHost()
                     }
@@ -60,7 +60,7 @@ class MainActivity : FragmentActivity() {
 @OptIn(ExperimentalPermissionsApi::class)
 @Composable
 fun MyApp(content: @Composable () -> Unit) {
-    Log.d("MyApp", "recompose")
+    SafeLog.d("MyApp", "recompose")
     MyAppTheme {
         Scaffold(
             modifier = Modifier.fillMaxSize()

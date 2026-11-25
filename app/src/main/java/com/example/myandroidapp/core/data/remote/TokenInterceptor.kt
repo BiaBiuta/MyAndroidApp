@@ -1,6 +1,6 @@
 package com.example.myandroidapp.core.data.remote
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.TAG
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -45,12 +45,12 @@ class TokenInterceptor : Interceptor {
       when {
         // 401 la o cerere CU token = sesiunea nu mai e valida pe server
         response.code == 401 -> {
-          Log.d(TAG, "401 de la server: sesiunea a expirat")
+          SafeLog.d(TAG, "401 de la server: sesiunea a expirat")
           _sessionEnded.tryEmit(SessionEnd.EXPIRED)
         }
         // 403 "cont blocat" (peekBody nu consuma raspunsul, il citeste si Retrofit)
         response.code == 403 && response.peekBody(2048).string().contains("blocat") -> {
-          Log.d(TAG, "403 de la server: contul a fost blocat")
+          SafeLog.d(TAG, "403 de la server: contul a fost blocat")
           _sessionEnded.tryEmit(SessionEnd.BLOCKED)
         }
       }

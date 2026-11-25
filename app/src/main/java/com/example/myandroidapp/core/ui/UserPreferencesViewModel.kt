@@ -1,6 +1,6 @@
 package com.example.myandroidapp.core.ui
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -19,12 +19,12 @@ class UserPreferencesViewModel(private val userPreferencesRepository: UserPrefer
     val uiState: Flow<UserPreferences> = userPreferencesRepository.userPreferencesStream
 
     init {
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
     }
 
     fun save(userPreferences: UserPreferences) {
         viewModelScope.launch {
-            Log.d(TAG, "saveUserPreferences...");
+            SafeLog.d(TAG, "saveUserPreferences...");
             userPreferencesRepository.save(userPreferences)
         }
     }

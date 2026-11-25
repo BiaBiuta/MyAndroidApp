@@ -2,7 +2,7 @@ package com.example.myandroidapp
 
 import android.content.Context
 import android.os.SystemClock
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
@@ -75,7 +75,7 @@ class MyAppViewModel(
         }.stateIn(viewModelScope, SharingStarted.Eagerly, SessionState.Loading)
 
     init {
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
         viewModelScope.launch {
             // O sesiune facuta offline intr-o pornire anterioara a aplicatiei nu mai poate trece singura
             // pe server (datele de login sunt tinute doar in memorie): cerem un login nou, ca postarile
@@ -93,7 +93,7 @@ class MyAppViewModel(
                 try {
                     roleRepository.registerSession(prefs)
                 } catch (e: Exception) {
-                    Log.w(TAG, "registerSession failed", e)
+                    SafeLog.w(TAG, "registerSession failed", e)
                 }
             }
         }
@@ -189,7 +189,7 @@ class MyAppViewModel(
             try {
                 postRepository.deleteAll()
             } catch (e: Exception) {
-                Log.w(TAG, "deleteAll failed", e)
+                SafeLog.w(TAG, "deleteAll failed", e)
             }
             onLoggedOut()
         }

@@ -1,7 +1,7 @@
 //import android.content.ContentResolver
 //import android.net.Uri
 //import android.util.Base64
-//import android.util.Log
+//import com.example.myandroidapp.core.logging.SafeLog
 //import java.io.File
 //import java.io.FileInputStream
 //import java.io.IOException

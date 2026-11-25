@@ -19,7 +19,7 @@ import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.material.icons.filled.CloudUpload
 import androidx.compose.material.icons.filled.CloudOff
 import android.app.Application
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.FastOutLinearInEasing
 import androidx.compose.animation.core.LinearOutSlowInEasing
@@ -105,7 +105,7 @@ fun PostsScreen(
     biometricEnabled: Boolean = false,
     onBiometricToggle: (enabled: Boolean) -> Unit = {}
 ) {
-    Log.d("PostsScreen", "recompose")
+    SafeLog.d("PostsScreen", "recompose")
 
     val itemsViewModel = viewModel<PostsViewModel>(factory = PostsViewModel.Factory)
     val myNetworkStatusViewModel = viewModel<MyNetworkStatusViewModel>(

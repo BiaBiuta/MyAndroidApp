@@ -2,7 +2,7 @@ package com.example.myandroidapp.todo.ui.admin
 
 import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.core.data.remote.OfflineException
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -71,7 +71,7 @@ class AdminViewModel(
             stats = try {
                 postRepository.stats()
             } catch (e: Exception) {
-                Log.w("AdminViewModel", "stats failed", e)
+                SafeLog.w("AdminViewModel", "stats failed", e)
                 null
             }
         }
@@ -123,7 +123,7 @@ class AdminViewModel(
             message = try {
                 block() ?: success
             } catch (e: Exception) {
-                Log.w("AdminViewModel", "admin action failed", e)
+                SafeLog.w("AdminViewModel", "admin action failed", e)
                 if (e is OfflineException) "Ești offline. Această acțiune are nevoie de conexiune la server."
                 else e.toUserMessage("Acțiunea nu a putut fi finalizată.")
             }

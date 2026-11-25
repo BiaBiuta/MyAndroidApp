@@ -1,7 +1,7 @@
 package com.example.myandroidapp.jobs
 
 import android.content.Context
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 import com.example.myandroidapp.MyApplication
@@ -19,10 +19,10 @@ class SyncWorker(
         return try {
             val done = repository.syncUnsynced()
             repository.refresh()
-            Log.d("SyncWorker", "sincronizare ${if (done) "completa" else "incompleta, se reia"}")
+            SafeLog.d("SyncWorker", "sincronizare ${if (done) "completa" else "incompleta, se reia"}")
             if (done) Result.success() else Result.retry()
         } catch (e: Exception) {
-            Log.w("SyncWorker", "sincronizarea a esuat, se reia", e)
+            SafeLog.w("SyncWorker", "sincronizarea a esuat, se reia", e)
             Result.retry()
         }
     }

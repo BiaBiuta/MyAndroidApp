@@ -1,6 +1,6 @@
 package com.example.myandroidapp.core.data
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
@@ -31,7 +31,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
     }
 
     init {
-        Log.d(TAG, "UserPreferencesRepository initialized")
+        SafeLog.d(TAG, "UserPreferencesRepository initialized")
     }
 
     // Flow pentru a obține datele utilizatorului
@@ -49,7 +49,7 @@ class UserPreferencesRepository(private val dataStore: DataStore<Preferences>) {
 
     // Salvează datele utilizatorului
     suspend fun save(userPreferences: UserPreferences) {
-        Log.d(TAG, "Saving userPreferences...")
+        SafeLog.d(TAG, "Saving userPreferences...")
         val userJson = Gson().toJson(userPreferences.user)
         // Datele sensibile (token-ul de sesiune si hash-ul parolei) se scriu doar CRIPTATE,
         // cu o cheie AES tinuta in Android Keystore (SecureStore)

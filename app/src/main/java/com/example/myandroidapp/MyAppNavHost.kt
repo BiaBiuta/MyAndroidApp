@@ -1,7 +1,7 @@
 package com.example.myandroidapp
 
 import android.os.Build
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import com.example.myandroidapp.auth.data.local.isAdmin
@@ -63,7 +63,7 @@ val userProfileRoute = "users"
 fun MyAppNavHost() {
     val navController = rememberNavController()
     val onClose = {
-        Log.d("MyAppNavHost", "navigation back to list")
+        SafeLog.d("MyAppNavHost", "navigation back to list")
         navController.popBackStack()
     }
 
@@ -106,15 +106,15 @@ fun MyAppNavHost() {
         composable(postsRoute) {
             PostsScreen(
                 onItemClick = { itemId ->
-                    Log.d("MyAppNavHost", "navigate to item $itemId")
+                    SafeLog.d("MyAppNavHost", "navigate to item $itemId")
                     if (!itemId.isNullOrEmpty()) navController.navigate("$postDetailRoute/${Uri.encode(itemId)}")
                 },
                 onAddItem = {
-                    Log.d("MyAppNavHost", "navigate to new item")
+                    SafeLog.d("MyAppNavHost", "navigate to new item")
                     navController.navigate("$postsRoute-new")
                 },
                 onLogout = {
-                    Log.d("MyAppNavHost", "logout")
+                    SafeLog.d("MyAppNavHost", "logout")
                     // sterge complet sesiunea + token-ul, apoi duce utilizatorul la login
                     myAppViewModel.logout {
                         navController.navigate(authRoute) {
@@ -123,7 +123,7 @@ fun MyAppNavHost() {
                     }
                 },
                 onOpenPrivate = {
-                    Log.d("MyAppNavHost", "navigate to private section")
+                    SafeLog.d("MyAppNavHost", "navigate to private section")
                     navController.navigate(privateRoute)
                 },
                 onOpenMyPosts = { navController.navigate(myPostsRoute) },
@@ -318,7 +318,7 @@ fun MyAppNavHost() {
                 sessionLocked = sessionState is SessionState.Locked,
                 onSessionUnlocked = { myAppViewModel.unlock() },
                 onEnterWithoutSession = {
-                    Log.d("MyAppNavHost", "enter without saved session")
+                    SafeLog.d("MyAppNavHost", "enter without saved session")
                     navController.navigate(postsRoute) {
                         popUpTo(authRoute) { inclusive = true }
                     }
@@ -332,7 +332,7 @@ fun MyAppNavHost() {
             // Sesiune activa (login cu parola, amprenta acceptata, sau sesiune salvata
             // fara amprenta) -> setam token-ul si intram in ecranul principal
             is SessionState.Active -> {
-                Log.d("MyAppNavHost", "session active, navigate to items")
+                SafeLog.d("MyAppNavHost", "session active, navigate to items")
                 Api.tokenInterceptor.token = state.token
                 myAppViewModel.setToken(state.token)
                 if (navController.currentDestination?.route == authRoute) {

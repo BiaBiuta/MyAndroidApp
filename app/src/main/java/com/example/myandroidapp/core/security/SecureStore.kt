@@ -3,7 +3,7 @@ package com.example.myandroidapp.core.security
 import android.security.keystore.KeyGenParameterSpec
 import android.security.keystore.KeyProperties
 import android.util.Base64
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import java.security.KeyStore
 import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
@@ -68,7 +68,7 @@ object SecureStore {
             String(cipher.doFinal(cipherText), Charsets.UTF_8)
         } catch (e: Exception) {
             // ex. cheia a fost stearsa (reinstalare) -> datele nu mai pot fi citite
-            Log.w(TAG, "decrypt failed", e)
+            SafeLog.w(TAG, "decrypt failed", e)
             ""
         }
     }

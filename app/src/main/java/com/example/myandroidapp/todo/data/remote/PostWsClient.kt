@@ -1,6 +1,6 @@
 package com.example.myandroidapp.todo.data.remote
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.remote.Api
 import com.example.myandroidapp.todo.data.Location
@@ -37,7 +37,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
         onClosed: () -> Unit,
         onFailure: () -> Unit
     ): WebSocket {
-        Log.d(TAG, "openSocket ${Api.wsUrl}")
+        SafeLog.d(TAG, "openSocket ${Api.wsUrl}")
         val request = Request.Builder().url(Api.wsUrl).build()
         val socket = okHttpClient.newWebSocket(
             request,
@@ -54,7 +54,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
 
     /** Inchide socket-ul curent (ex. aplicatia trece in fundal). */
     fun closeSocket() {
-        Log.d(TAG, "closeSocket")
+        SafeLog.d(TAG, "closeSocket")
         val socket = webSocket
         webSocket = null
         isConnected = false
@@ -91,7 +91,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
     ) : WebSocketListener() {
 
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.d(TAG, "onOpen")
+            SafeLog.d(TAG, "onOpen")
             if (!isCurrent(webSocket)) {
                 // un socket vechi s-a deschis dupa ce am cerut inchiderea lui
                 webSocket.close(1000, "")
@@ -103,19 +103,20 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, "onMessage string ${text.take(300)}")
+            // doar dimensiunea: mesajul contine postari intregi (text, loc, coordonate)
+            SafeLog.d(TAG, "onMessage: ${text.length} caractere")
             // Orice mesaj neasteptat e ignorat; inainte o exceptie aici inchidea conexiunea.
             val event = try {
                 parseEvent(text)
             } catch (e: Exception) {
-                Log.w(TAG, "Mesaj WebSocket ignorat (format necunoscut)", e)
+                SafeLog.w(TAG, "Mesaj WebSocket ignorat (format necunoscut)", e)
                 null
             }
             if (event != null) onEvent(event)
         }
 
         override fun onMessage(webSocket: WebSocket, bytes: ByteString) {
-            Log.d(TAG, "onMessage bytes $bytes")
+            SafeLog.d(TAG, "onMessage: ${bytes.size} octeti")
         }
 
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
@@ -123,13 +124,13 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "onClosed code: $code reason: $reason")
+            SafeLog.d(TAG, "onClosed code: $code reason: $reason")
             if (isCurrent(webSocket)) isConnected = false
             onClosed()
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.d(TAG, "onFailure throwable: $t")
+            SafeLog.d(TAG, "onFailure throwable: $t")
             if (isCurrent(webSocket)) isConnected = false
             onFailure()
         }
@@ -168,7 +169,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
         val parsed = try {
             com.example.myandroidapp.core.data.remote.Api.gson.fromJson(p.toString(), Post::class.java)
         } catch (e: Exception) {
-            Log.w(TAG, "eveniment cu postare invalida", e)
+            SafeLog.w(TAG, "eveniment cu postare invalida", e)
             null
         } ?: return null
         val post = parsed.copy(
@@ -186,7 +187,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
             .put("type", "authorization")
             .put("payload", JSONObject().put("token", token))
             .toString()
-        Log.d(TAG, "send authorization")
+        SafeLog.d(TAG, "send authorization")
         socket.send(auth)
     }
 
@@ -199,7 +200,7 @@ class PostWsClient(private val okHttpClient: OkHttpClient) {
         if (isConnected && socket != null && accepted != null) {
             sendAuthorization(socket, accepted)
         } else {
-            Log.d(TAG, "Token pastrat; va fi trimis la deschiderea socket-ului")
+            SafeLog.d(TAG, "Token pastrat; va fi trimis la deschiderea socket-ului")
         }
     }
 }

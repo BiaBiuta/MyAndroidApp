@@ -2,7 +2,7 @@ package com.example.myandroidapp.todo.ui.myposts
 
 import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.core.data.remote.OfflineException
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxSize
@@ -87,7 +87,7 @@ class MyPostsViewModel(
                 val result = postRepository.deletePost(post.id, user.email)
                 message = com.example.myandroidapp.todo.ui.post.writeResultMessage(result, "Postarea a fost ștearsă.")
             } catch (e: Exception) {
-                Log.w("MyPostsViewModel", "delete failed", e)
+                SafeLog.w("MyPostsViewModel", "delete failed", e)
                 message = e.toUserMessage("Postarea nu a putut fi ștearsă.")
             }
         }
@@ -107,7 +107,7 @@ class MyPostsViewModel(
                     "Ciorna a fost publicată."
                 )
             } catch (e: Exception) {
-                Log.w("MyPostsViewModel", "publish failed", e)
+                SafeLog.w("MyPostsViewModel", "publish failed", e)
                 e.toUserMessage("Ciorna nu a putut fi publicată.")
             }
         }

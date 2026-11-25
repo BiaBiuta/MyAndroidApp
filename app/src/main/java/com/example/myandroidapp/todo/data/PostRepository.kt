@@ -5,7 +5,7 @@ import okhttp3.RequestBody.Companion.asRequestBody
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.distinctUntilChanged
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.Result
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.core.data.remote.Api
@@ -450,7 +450,7 @@ class PostRepository(
     }
 
     init {
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
     }
     suspend fun parseLocation(locationString: String): Location {
         val coordinates = locationString.split(",")
@@ -469,7 +469,7 @@ class PostRepository(
      * utilizator (ex. offline: "se afiseaza postarile salvate"); lista din cache ramane.
      */
     suspend fun refresh(): String? {
-        Log.d(TAG, "refresh started")
+        SafeLog.d(TAG, "refresh started")
         return try {
             posts = apiCall { postService.find() }
             // modificarile facute offline (inca netrimise) nu se suprascriu cu versiunea serverului
@@ -479,14 +479,14 @@ class PostRepository(
             itemDao.replacePublicSynced(
                 posts.filter { it.id !in dirtyIds }.map { it.asSynced().safeForCache() }
             )
-            Log.d(TAG, "refresh succeeded: ${posts.size}")
+            SafeLog.d(TAG, "refresh succeeded: ${posts.size}")
             runCatching { afterRefresh() }
             null
         } catch (e: OfflineException) {
-            Log.w(TAG, "refresh: server indisponibil", e)
+            SafeLog.w(TAG, "refresh: server indisponibil", e)
             "Ești offline. Se afișează postările salvate pe telefon."
         } catch (e: Exception) {
-            Log.w(TAG, "refresh failed", e)
+            SafeLog.w(TAG, "refresh failed", e)
             e.toUserMessage("Postările nu au putut fi actualizate.")
         }
     }
@@ -504,7 +504,7 @@ class PostRepository(
      */
     suspend fun openWsClient() {
         val generation = ++wsGeneration
-        Log.d(TAG, "openWsClient #$generation")
+        SafeLog.d(TAG, "openWsClient #$generation")
         withContext(Dispatchers.IO) {
             // Cat timp aplicatia e deschisa: daca exista postari in coada, reincercam trimiterea la
             // fiecare 10 s. Nu depinde de WebSocket sau de WorkManager (care asteapta tot mai mult
@@ -516,7 +516,7 @@ class PostRepository(
                     val owner = currentOwnerKey()
                     val waiting = itemDao.getUnsyncedItems().any { it.user_id == owner }
                     if (waiting) {
-                        Log.d(TAG, "retry: postari in coada, incercam trimiterea")
+                        SafeLog.d(TAG, "retry: postari in coada, incercam trimiterea")
                         if (syncUnsynced()) refresh()
                     }
                 }
@@ -525,7 +525,8 @@ class PostRepository(
             while (isActive && generation == wsGeneration) {
                 var opened = false
                 getPostEvents(onOpen = { opened = true }).collect {
-                    Log.d(TAG, "Item event collected $it")
+                    // doar tipul evenimentului si id-ul postarii, nu continutul ei
+                    SafeLog.d(TAG, "eveniment primit: " + if (it is Result.Success) "${it.data.event} ${it.data.payload.item.id}" else "eroare")
                     if (it is Result.Success) {
                         val itemEvent = it.data
                         when (itemEvent.event) {
@@ -539,7 +540,7 @@ class PostRepository(
                 // socket-ul s-a inchis sau nu s-a putut conecta
                 if (generation != wsGeneration) break
                 if (opened) backoffMs = 2_000L
-                Log.d(TAG, "WebSocket inchis, reconectare in ${backoffMs}ms")
+                SafeLog.d(TAG, "WebSocket inchis, reconectare in ${backoffMs}ms")
                 delay(backoffMs)
                 backoffMs = (backoffMs * 2).coerceAtMost(30_000L)
             }
@@ -547,7 +548,7 @@ class PostRepository(
     }
 
     suspend fun closeWsClient() {
-        Log.d(TAG, "closeWsClient")
+        SafeLog.d(TAG, "closeWsClient")
         wsGeneration++
         withContext(Dispatchers.IO) {
             postWsClient.closeSocket()
@@ -555,7 +556,7 @@ class PostRepository(
     }
 
     fun getPostEvents(onOpen: () -> Unit = {}): Flow<Result<PostEvent>> = callbackFlow {
-        Log.d(TAG, "getItemEvents started")
+        SafeLog.d(TAG, "getItemEvents started")
         val socket = postWsClient.openSocket(
             onOpen = {
                 onOpen()
@@ -567,7 +568,7 @@ class PostRepository(
             },
             onEvent = {
                 if (it != null) {
-                    Log.d(TAG, "onEvent ${it.event} ${it.payload.item.id}")
+                    SafeLog.d(TAG, "onEvent ${it.event} ${it.payload.item.id}")
                     trySend(Result.Success(it))
                 }
             },
@@ -663,7 +664,7 @@ class PostRepository(
      */
     private fun Post.safeForCache(): Post =
         if (photo.length > MAX_CACHED_PHOTO_CHARS) {
-            Log.w(TAG, "postarea $id are o poza prea mare (${photo.length / 1024} KB), se salveaza fara poza")
+            SafeLog.w(TAG, "postarea $id are o poza prea mare (${photo.length / 1024} KB), se salveaza fara poza")
             copy(photo = "")
         } else this
 
@@ -673,14 +674,14 @@ class PostRepository(
         ownerKeys.distinctUntilChanged().flatMapLatest { itemDao.observeUnsyncedCountFor(it) }
 
     private suspend fun handleItemDeleted(item: Post) {
-        Log.d(TAG, "handleItemDeleted ${item.id}")
+        SafeLog.d(TAG, "handleItemDeleted ${item.id}")
         // o editare offline a acestei postari va primi 410 la sincronizare (-> ciorna privata)
         if (itemDao.findById(item.id)?.isNotSaved == true) return
         itemDao.deleteById(item.id)
     }
 
     private suspend fun handleItemUpdated(post: Post) {
-        Log.d(TAG, "handleItemUpdated ${post.id}")
+        SafeLog.d(TAG, "handleItemUpdated ${post.id}")
         storeFromServer(post, overwriteLocalChanges = false)
     }
 
@@ -712,13 +713,13 @@ class PostRepository(
         // doar postarile contului conectat acum (nu ale altui cont de pe acelasi telefon)
         val ownerKey = currentOwnerKey()
         val pending = itemDao.getUnsyncedItems().filter { it.user_id == ownerKey }
-        Log.d(TAG, "syncUnsynced: ${pending.size}")
+        SafeLog.d(TAG, "syncUnsynced: ${pending.size}")
         var published = 0
         for (post in pending) {
             val result = push(post.id)
             if (result == WriteResult.Sent && !post.isDeleted) published++
             if (result == WriteResult.Queued) {
-                Log.d(TAG, "syncUnsynced: server indisponibil, reincercam mai tarziu")
+                SafeLog.d(TAG, "syncUnsynced: server indisponibil, reincercam mai tarziu")
                 onOfflinePostsSynced(published)
                 return@withLock false
             }
@@ -736,15 +737,15 @@ class PostRepository(
     }
 
     private suspend fun handleItemCreated(post: Post) {
-        Log.d(TAG, "handleItemCreated...")
+        SafeLog.d(TAG, "handleItemCreated...")
         // postare noua de la ALTCINEVA (nu o copie a uneia pe care o avem deja) -> notificare
         val known = itemDao.findById(post.id) != null
         if (!known && post.user_id != currentOwnerKey() && post.status != PostStatus.DRAFT) {
             onNewPostFromOthers(post)
         }
-        //Log.d(TAG,post.toString())
+        //SafeLog.d(TAG,post.toString())
 //        posts = listOf(post) + posts
-//        //Log.d(posts.toString(),"posts")
+//        //SafeLog.d(posts.toString(),"posts")
 //        postsFlow.emit(Result.Success(posts))
         // ce vine de pe server / WebSocket e mereu public
         storeFromServer(post, overwriteLocalChanges = false)

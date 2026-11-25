@@ -1,6 +1,6 @@
 package com.example.myandroidapp.auth.data
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.auth.data.local.AuthProvider
 import com.example.myandroidapp.auth.data.local.UserRole
 import com.example.myandroidapp.auth.data.remote.AuthDataSource
@@ -86,7 +86,7 @@ class AuthRepository(
             return null // serverul tot nu raspunde: incercam la urmatoarea sincronizare
         } catch (e: ServerException) {
             // ex. parola schimbata sau cont blocat intre timp: e nevoie de un login nou, manual
-            Log.w(TAG, "reautentificarea pe server a esuat: ${e.status}")
+            SafeLog.w(TAG, "reautentificarea pe server a esuat: ${e.status}")
             forgetDeferredLogin()
             return null
         }
@@ -107,7 +107,7 @@ class AuthRepository(
         } catch (e: ServerException) {
             failureFrom(e)
         } catch (e: OfflineException) {
-            Log.d(TAG, "server indisponibil, login verificat in baza locala")
+            SafeLog.d(TAG, "server indisponibil, login verificat in baza locala")
             offlineLogin(email, password, passwordHash)
         }
     }
@@ -216,7 +216,7 @@ class AuthRepository(
                 try {
                     authDataSource.logout()
                 } catch (e: Exception) {
-                    Log.w(TAG, "logout pe server esuat (token-ul expira oricum)", e)
+                    SafeLog.w(TAG, "logout pe server esuat (token-ul expira oricum)", e)
                 }
             }
         }

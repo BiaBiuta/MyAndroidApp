@@ -2,7 +2,7 @@ package com.example.myandroidapp.todo.ui.posts
 
 import com.example.myandroidapp.core.data.remote.toUserMessage
 import com.example.myandroidapp.core.data.remote.OfflineException
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -159,7 +159,7 @@ class PostsViewModel(
             val done = try {
                 postRepository.syncNow()
             } catch (e: Exception) {
-                Log.w(TAG, "syncNow failed", e)
+                SafeLog.w(TAG, "syncNow failed", e)
                 false
             }
             if (done) postRepository.refresh()
@@ -191,7 +191,7 @@ class PostsViewModel(
             try {
                 postRepository.setLiked(post.id, !post.liked_by_me)
             } catch (e: Exception) {
-                Log.w(TAG, "like failed", e)
+                SafeLog.w(TAG, "like failed", e)
                 message = if (e is com.example.myandroidapp.core.data.remote.OfflineException)
                     "Aprecierile au nevoie de conexiune la server."
                 else e.toUserMessage("Aprecierea nu a putut fi salvată.")
@@ -213,14 +213,14 @@ class PostsViewModel(
                     "Ciorna a fost publicată."
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "publish failed", e)
+                SafeLog.w(TAG, "publish failed", e)
                 "Ciorna nu a putut fi publicată."
             }
         }
     }
 
     init {
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
         loadItems()
         // mesaje din sincronizarea din fundal (conflict, postare stearsa de moderator)
         viewModelScope.launch {
@@ -229,7 +229,7 @@ class PostsViewModel(
     }
 
     fun loadItems() {
-        Log.d(TAG, "loadItems...")
+        SafeLog.d(TAG, "loadItems...")
         if (isRefreshing) return
         viewModelScope.launch {
             isRefreshing = true
@@ -273,7 +273,7 @@ class PostsViewModel(
                 if (post.hidden) "Postarea este din nou vizibilă tuturor."
                 else "Postarea a fost ascunsă din feed. Autorul o vede în continuare, dar nu o mai poate publica."
             } catch (e: Exception) {
-                Log.w(TAG, "toggle hidden failed", e)
+                SafeLog.w(TAG, "toggle hidden failed", e)
                 if (e is OfflineException) "Ești offline. Moderarea are nevoie de conexiune la server."
                 else e.toUserMessage("Vizibilitatea postării nu a putut fi schimbată.")
             }
@@ -294,7 +294,7 @@ class PostsViewModel(
                 val result = postRepository.deletePost(post.id, user.email, authorMessage)
                 message = com.example.myandroidapp.todo.ui.post.writeResultMessage(result, "Postarea a fost ștearsă.")
             } catch (e: Exception) {
-                Log.w(TAG, "delete failed", e)
+                SafeLog.w(TAG, "delete failed", e)
                 // doar moderarea (postarea altcuiva) cere conexiune; autorul poate sterge si offline
                 message = if (e is OfflineException)
                     "Ești offline. Moderarea are nevoie de conexiune la server."
@@ -314,7 +314,7 @@ class PostsViewModel(
                 postRepository.reportPost(post.id, user.email, reason)
                 message = "Mulțumim! Raportarea a fost trimisă administratorilor."
             } catch (e: Exception) {
-                Log.w(TAG, "report failed", e)
+                SafeLog.w(TAG, "report failed", e)
                 message = "Raportarea nu a putut fi trimisă."
             }
         }

@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Location
 import android.os.Looper
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.google.android.gms.location.LocationCallback
 import com.google.android.gms.location.LocationRequest
 import com.google.android.gms.location.LocationResult
@@ -20,7 +20,7 @@ class LocationMonitor(val context: Context) {
         val fusedLocationClient = LocationServices.getFusedLocationProviderClient(context)
 
         fusedLocationClient.lastLocation.addOnSuccessListener {
-            Log.d("LocationMonitor", "lastLocation $it")
+            SafeLog.d("LocationMonitor", "lastLocation $it")
             if (it != null) {
                 channel.trySend(it)
             }
@@ -30,7 +30,7 @@ class LocationMonitor(val context: Context) {
             override fun onLocationResult(locationResult: LocationResult) {
                 locationResult ?: return
                 for (location in locationResult.locations) {
-                    Log.d("LocationMonitor", "onLocationResult $location")
+                    SafeLog.d("LocationMonitor", "onLocationResult $location")
                     channel.trySend(location)
                 }
             }
@@ -43,7 +43,7 @@ class LocationMonitor(val context: Context) {
         )
 
         awaitClose {
-            Log.d("LocationMonitor", "removeLocationUpdates")
+            SafeLog.d("LocationMonitor", "removeLocationUpdates")
             fusedLocationClient.removeLocationUpdates(locationCallback)
         }
     }

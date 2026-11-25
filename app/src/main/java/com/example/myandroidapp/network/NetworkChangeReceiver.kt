@@ -4,7 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
 import android.net.NetworkCapabilities
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.work.OneTimeWorkRequest
 import androidx.work.WorkManager
 import com.example.myandroidapp.core.TAG
@@ -14,7 +14,7 @@ import kotlin.math.log
 class NetworkChangeReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         if (isOnline(context)) {
-            Log.d(TAG,"sunt online")
+            SafeLog.d(TAG,"sunt online")
             // Pornește un worker pentru a sincroniza datele salvate local
             // sincronizarea din coada: unica, cu retea, reluata automat (SyncScheduler)
             com.example.myandroidapp.jobs.SyncScheduler.schedule(context)

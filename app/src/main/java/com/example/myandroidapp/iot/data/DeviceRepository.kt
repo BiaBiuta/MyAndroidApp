@@ -1,6 +1,6 @@
 package com.example.myandroidapp.iot.data
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.data.remote.ServerException
 import com.example.myandroidapp.core.data.remote.apiCall
 import com.example.myandroidapp.core.data.remote.toUserMessage
@@ -166,7 +166,7 @@ class DeviceRepository(
         }
         null
     } catch (e: Exception) {
-        Log.w(TAG, "refresh devices failed", e)
+        SafeLog.w(TAG, "refresh devices failed", e)
         e.message
     }
 
@@ -212,7 +212,7 @@ class DeviceRepository(
                     apiCall { service.setFirmware(device.id, mapOf("version" to state.firmware)) }
                 } catch (e: Exception) {
                     // trackerul e actualizat; serverul afla versiunea la urmatoarea sincronizare
-                    Log.w(TAG, "firmware report failed", e)
+                    SafeLog.w(TAG, "firmware report failed", e)
                 }
                 return "Semnătura a fost verificată. Versiunea ${check.update.version} a fost instalată pe tracker."
             }

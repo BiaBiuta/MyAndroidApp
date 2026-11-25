@@ -4,7 +4,7 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.location.Address
 import android.location.Geocoder
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.google.android.gms.location.LocationServices
 import com.google.android.gms.location.Priority
 import com.google.android.gms.tasks.CancellationTokenSource
@@ -80,7 +80,7 @@ object PlaceSearch {
             .filter { it.hasLatitude() && it.hasLongitude() }
             .map { Place(shortName(it), it.latitude, it.longitude) }
     } catch (e: Exception) {
-        Log.w(TAG, "geocoder search failed", e)
+        SafeLog.w(TAG, "geocoder search failed", e)
         emptyList()
     }
 
@@ -89,7 +89,7 @@ object PlaceSearch {
         if (!Geocoder.isPresent()) null
         else Geocoder(context, locale).getFromLocation(latitude, longitude, 1)?.firstOrNull()?.let(::shortName)
     } catch (e: Exception) {
-        Log.w(TAG, "geocoder reverse failed", e)
+        SafeLog.w(TAG, "geocoder reverse failed", e)
         null
     }
 
@@ -119,7 +119,7 @@ object PlaceSearch {
             Place(photonLabel(properties), coordinates[1].asDouble, coordinates[0].asDouble)
         }
     } catch (e: Exception) {
-        Log.w(TAG, "photon search failed", e)
+        SafeLog.w(TAG, "photon search failed", e)
         emptyList()
     }
 
@@ -134,7 +134,7 @@ object PlaceSearch {
                 ?.takeIf { it.isNotBlank() }
         }
     } catch (e: Exception) {
-        Log.w(TAG, "photon reverse failed", e)
+        SafeLog.w(TAG, "photon reverse failed", e)
         null
     }
 
@@ -166,7 +166,7 @@ object PlaceSearch {
             Place(shorten(o.get("display_name")?.asString.orEmpty()), lat, lon)
         }
     } catch (e: Exception) {
-        Log.w(TAG, "nominatim search failed", e)
+        SafeLog.w(TAG, "nominatim search failed", e)
         emptyList()
     }
 
@@ -182,7 +182,7 @@ object PlaceSearch {
             JsonParser().parse(body).asJsonObject.get("display_name")?.asString?.let(::shorten)
         }
     } catch (e: Exception) {
-        Log.w(TAG, "nominatim reverse failed", e)
+        SafeLog.w(TAG, "nominatim reverse failed", e)
         null
     }
 
@@ -198,13 +198,13 @@ object PlaceSearch {
             http.newCall(request).execute().use { response ->
                 if (response.isSuccessful) response.body?.string()
                 else {
-                    Log.w(TAG, "$url -> HTTP ${response.code}")
+                    SafeLog.w(TAG, "$url -> HTTP ${response.code}")
                     null
                 }
             }
         } catch (e: java.io.IOException) {
             networkFailures += 1
-            Log.w(TAG, "$url: fara retea", e)
+            SafeLog.w(TAG, "$url: fara retea", e)
             null
         }
     }

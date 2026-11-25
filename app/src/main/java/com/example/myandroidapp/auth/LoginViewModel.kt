@@ -1,7 +1,7 @@
 package com.example.myandroidapp.auth
 
 import android.app.Application
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.biometric.BiometricManager
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -212,7 +212,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 if (state.isLoginMode) authRepository.login(state.email, state.password)
                 else authRepository.register(state.email, state.password)
             } catch (e: Exception) {
-                Log.w(TAG, "auth failed", e)
+                SafeLog.w(TAG, "auth failed", e)
                 AuthRepository.AuthResult.Failure(
                     "A apărut o eroare neașteptată. Încercați din nou.",
                     AuthRepository.Reason.REJECTED
@@ -350,7 +350,7 @@ class LoginViewModel(application: Application) : AndroidViewModel(application) {
                 if (method == AuthMethod.ANONYMOUS) authRepository.signInAnonymously(value)
                 else authRepository.signInWithProvider(method.provider, value)
             } catch (e: Exception) {
-                Log.w(TAG, "provider sign-in failed", e)
+                SafeLog.w(TAG, "provider sign-in failed", e)
                 AuthRepository.AuthResult.Failure(
                     "Conectarea nu a reușit. Încercați din nou.",
                     AuthRepository.Reason.REJECTED

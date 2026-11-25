@@ -1,6 +1,6 @@
 import android.app.Application
 import android.location.Location
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -25,10 +25,10 @@ class MyLocationViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     public fun collectLocation() {
-        Log.d("MyLocationViewModel", "collectLocation")
+        SafeLog.d("MyLocationViewModel", "collectLocation")
         viewModelScope.launch {
             LocationMonitor(getApplication()).currentLocation.collect {
-                Log.d("MyLocationViewModel", "collect $it")
+                SafeLog.d("MyLocationViewModel", "collect $it")
                 uiState = it
             }
         }
@@ -37,7 +37,7 @@ class MyLocationViewModel(application: Application) : AndroidViewModel(applicati
     // Funcție pentru actualizarea locației selectate manual
     fun updateSelectedLocation(latitude: Double, longitude: Double) {
         selectedLocation = Pair(latitude, longitude)
-        Log.d("MyLocationViewModel", "Selected location updated: $selectedLocation")
+        SafeLog.d("MyLocationViewModel", "Selected location updated: $selectedLocation")
     }
 
     companion object {

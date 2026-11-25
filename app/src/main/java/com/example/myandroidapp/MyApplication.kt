@@ -17,7 +17,7 @@ package com.example.myandroidapp/*
 import android.app.Application
 import android.content.IntentFilter
 import android.net.ConnectivityManager
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.TAG
 import com.example.myandroidapp.network.NetworkChangeReceiver
 import com.example.myapplication.core.AppContainer
@@ -28,7 +28,7 @@ class MyApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "init")
+        SafeLog.d(TAG, "init")
          networkChangeReceiver = NetworkChangeReceiver()
         val intentFilter = IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION)
         registerReceiver(networkChangeReceiver, intentFilter)

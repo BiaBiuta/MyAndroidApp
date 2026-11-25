@@ -1,6 +1,6 @@
 package com.example.myandroidapp.jobs
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
@@ -55,14 +55,14 @@ class ServerWorker(
         return try {
             if (isSaving) {
                 val result = itemRepository.createPost(item.copy(isNotSaved = false))
-                Log.d("ServerWorker", "postare noua: $result")
+                SafeLog.d("ServerWorker", "postare noua: $result")
             } else {
                 itemRepository.updatePost(item)
             }
             Result.success()
         } catch (e: Exception) {
             // ex. serverul a refuzat postarea (date invalide, cont fara drept de publicare)
-            Log.w("ServerWorker", "postarea nu a putut fi salvata", e)
+            SafeLog.w("ServerWorker", "postarea nu a putut fi salvata", e)
             Result.failure()
         }
     }

@@ -7,7 +7,7 @@ import android.graphics.ImageDecoder
 import android.net.Uri
 import android.os.Build
 import android.util.Base64
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import java.io.ByteArrayOutputStream
 
 /**
@@ -41,11 +41,11 @@ object PhotoEncoder {
             val dir = java.io.File(context.filesDir, "photos").apply { mkdirs() }
             val file = java.io.File(dir, "${java.util.UUID.randomUUID()}.jpg")
             file.writeBytes(bytes)
-            Log.d(TAG, "poza salvata: ${file.name}, ${bytes.size / 1024} KB")
+            SafeLog.d(TAG, "poza salvata: ${file.name}, ${bytes.size / 1024} KB")
             file.absolutePath
         }
     } catch (e: Exception) {
-        Log.w(TAG, "poza nu a putut fi salvata", e)
+        SafeLog.w(TAG, "poza nu a putut fi salvata", e)
         null
     }
 
@@ -53,7 +53,7 @@ object PhotoEncoder {
     fun fileToBase64(path: String): String? = try {
         "data:image/jpeg;base64," + Base64.encodeToString(java.io.File(path).readBytes(), Base64.NO_WRAP)
     } catch (e: Exception) {
-        Log.w(TAG, "poza nu a putut fi citita", e)
+        SafeLog.w(TAG, "poza nu a putut fi citita", e)
         null
     }
 
@@ -65,11 +65,11 @@ object PhotoEncoder {
         } else {
             val bytes = compress(bitmap)
             bitmap.recycle()
-            Log.d(TAG, "poza pregatita: ${bytes.size / 1024} KB")
+            SafeLog.d(TAG, "poza pregatita: ${bytes.size / 1024} KB")
             "data:image/jpeg;base64," + Base64.encodeToString(bytes, Base64.NO_WRAP)
         }
     } catch (e: Exception) {
-        Log.w(TAG, "poza nu a putut fi citita", e)
+        SafeLog.w(TAG, "poza nu a putut fi citita", e)
         null
     }
 

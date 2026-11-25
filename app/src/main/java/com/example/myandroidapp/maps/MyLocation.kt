@@ -3,7 +3,7 @@ package com.example.myandroidapp.maps
 import MyLocationViewModel
 import android.Manifest
 import android.app.Application
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -25,10 +25,10 @@ fun MyLocation(modifier: Modifier = Modifier, onLocationSelected: (Double, Doubl
         )
     )
 
-    Log.d("Permissions", "Permissions granted: ${permissionsState.allPermissionsGranted}")
+    SafeLog.d("Permissions", "Permissions granted: ${permissionsState.allPermissionsGranted}")
 
     if (permissionsState.allPermissionsGranted) {
-        Log.d("Permissions", "Permissions granted, loading map.")
+        SafeLog.d("Permissions", "Permissions granted, loading map.")
         // Permisiunile sunt acordate, încarcă harta
         ShowMyLocation(
             modifier = modifier,
@@ -43,7 +43,7 @@ fun MyLocation(modifier: Modifier = Modifier, onLocationSelected: (Double, Doubl
             ),
             modifier = modifier
         ) {
-//            Log.d("Permissions", "Permissions granted after request, loading map.")
+//            SafeLog.d("Permissions", "Permissions granted after request, loading map.")
 //            val myLocationViewModel = viewModel<MyLocationViewModel>(
 //                factory = MyLocationViewModel.Factory(
 //                    LocalContext.current.applicationContext as Application
@@ -72,13 +72,13 @@ fun ShowMyLocation(modifier: Modifier, onLocationSelected: (Double, Double) -> U
     // Locația curentă obținută prin ViewModel
     //val selectedLocation = myLocationViewModel.selectedLocation // Locația selectată manual
 
-    Log.d("Location", "Location: $location")
+    SafeLog.d("Location", "Location: $location")
 
     if (location != null) {
         val latitude =  location.latitude
         val longitude = location.longitude
 
-        Log.d("Location", "Latitude: $latitude, Longitude: $longitude")
+        SafeLog.d("Location", "Latitude: $latitude, Longitude: $longitude")
 
         MyMap(
             lat = latitude,

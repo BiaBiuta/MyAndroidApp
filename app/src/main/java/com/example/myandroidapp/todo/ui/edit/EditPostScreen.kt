@@ -1,7 +1,7 @@
 package com.example.myandroidapp.todo.ui.edit
 
 import kotlinx.coroutines.flow.stateIn
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -142,7 +142,7 @@ class EditPostViewModel(
                     )
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "load failed", e)
+                SafeLog.w(TAG, "load failed", e)
                 uiState = EditPostUiState(loading = false, error = "Postarea nu a putut fi încărcată.")
             }
         }
@@ -245,7 +245,7 @@ class EditPostViewModel(
                     )
                 )
             } catch (e: Exception) {
-                Log.w(TAG, "save failed", e)
+                SafeLog.w(TAG, "save failed", e)
                 uiState = uiState.copy(saving = false, error = e.toUserMessage("Modificările nu au putut fi salvate."))
             }
         }

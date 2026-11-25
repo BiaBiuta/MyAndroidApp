@@ -1,6 +1,6 @@
 package com.example.myandroidapp.community.data
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.core.data.remote.OfflineException
 import com.example.myandroidapp.core.data.remote.ServerException
 import com.example.myandroidapp.core.data.remote.apiCall
@@ -115,7 +115,7 @@ class CommunityRepository(
                 )
             }
         } catch (e: Exception) {
-            Log.w(TAG, "refreshTrips", e)
+            SafeLog.w(TAG, "refreshTrips", e)
         }
     }
 
@@ -146,7 +146,7 @@ class CommunityRepository(
             followDao.clear(owner)
             ids.forEach { followDao.add(FollowEntity(owner, it)) }
         } catch (e: Exception) {
-            Log.w(TAG, "refreshFollowing", e)
+            SafeLog.w(TAG, "refreshFollowing", e)
         }
     }
 

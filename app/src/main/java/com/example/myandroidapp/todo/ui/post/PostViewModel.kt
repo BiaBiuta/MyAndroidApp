@@ -1,7 +1,7 @@
 package com.example.myandroidapp.todo.ui.post
 
 import kotlinx.coroutines.flow.stateIn
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -175,7 +175,7 @@ class PostViewModel(
                 }
                 state = state.copy(saving = false, savedMessage = message)
             } catch (e: Exception) {
-                Log.w(TAG, "save failed", e)
+                SafeLog.w(TAG, "save failed", e)
                 state = state.copy(saving = false, error = e.toUserMessage("Postarea nu a putut fi salvată."))
             }
         }

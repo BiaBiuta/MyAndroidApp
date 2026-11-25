@@ -1,6 +1,6 @@
 package com.example.myandroidapp.auth.data
 
-import android.util.Log
+import com.example.myandroidapp.core.logging.SafeLog
 import com.example.myandroidapp.auth.data.local.AuthProvider
 import com.example.myandroidapp.auth.data.remote.RemoteUser
 import com.example.myandroidapp.auth.data.remote.UserService
@@ -214,7 +214,7 @@ class RoleRepository(
         return try {
             val updated = apiCall { userService.update(serverId, changes) }
             saveRemoteUser(updated)
-            Log.d(TAG, "${target.email} actualizat pe server: $changes")
+            SafeLog.d(TAG, "${target.email} actualizat pe server: $changes")
             null
         } catch (e: OfflineException) {
             "Ești offline. Rolurile și blocarea se pot schimba doar cu conexiune la server."
