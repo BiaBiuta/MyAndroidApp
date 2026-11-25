@@ -1,4 +1,3 @@
-import java.util.Properties
 
 plugins {
     alias(libs.plugins.android.application)
@@ -12,15 +11,6 @@ plugins {
 }
 ksp {
     arg("room.schemaLocation", "$projectDir/schemas")
-}
-
-// Cheia de semnare pentru release NU sta in repo: se citeste din keystore.properties
-// (pus in .gitignore). Fara fisier, release-ul se semneaza cu cheia de debug, ca sa poata fi
-// instalat pentru demo. Vezi SECURITY.md, sectiunea "Secrete".
-// (in afara blocului android: acolo "java" ar insemna extensia java { }, nu pachetul java.util)
-val keystoreFile = rootProject.file("keystore.properties")
-val keystore = Properties().apply {
-    if (keystoreFile.exists()) keystoreFile.inputStream().use { load(it) }
 }
 
 android {
@@ -46,29 +36,13 @@ android {
         buildConfigField("String", "SERVER_HOST", "\"127.0.0.1:3000\"")
     }
 
-    signingConfigs {
-        if (keystoreFile.exists()) {
-            create("release") {
-                storeFile = rootProject.file(keystore.getProperty("storeFile"))
-                storePassword = keystore.getProperty("storePassword")
-                keyAlias = keystore.getProperty("keyAlias")
-                keyPassword = keystore.getProperty("keyPassword")
-            }
-        }
-    }
-
     buildTypes {
         release {
-            // R8: sterge codul nefolosit si ofuscheaza restul (reguli in proguard-rules.pro)
-            isMinifyEnabled = true
-            isShrinkResources = true
-            isDebuggable = false
+            isMinifyEnabled = false
             proguardFiles(
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (keystoreFile.exists()) signingConfigs.getByName("release")
-            else signingConfigs.getByName("debug")
         }
     }
     compileOptions {

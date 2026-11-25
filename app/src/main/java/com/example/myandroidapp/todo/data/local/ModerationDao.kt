@@ -118,7 +118,7 @@ interface ModerationDao {
     @Query("SELECT reason FROM reports WHERE postId = :postId AND status = 'PENDING'")
     suspend fun pendingReasons(postId: String): List<String>
 
-    // ---------- Mesaje pentru autorii postarilor sterse ----------
+    // Mesaje pentru autorii postarilor sterse
 
     @Insert
     suspend fun insertNotice(notice: AuthorNoticeEntity)

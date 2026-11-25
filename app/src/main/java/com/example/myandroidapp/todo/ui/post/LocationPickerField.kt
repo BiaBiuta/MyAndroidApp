@@ -76,7 +76,7 @@ import kotlinx.coroutines.launch
 val Location.isSet: Boolean get() = latitude != 0.0 || longitude != 0.0
 
 /**
- * Alegerea locului unei postari, fara servicii platite:
+ * Alegerea locului unei postari:
  *  - cautare dupa nume (Geocoder din Android / OpenStreetMap Nominatim);
  *  - "Locația mea" (GPS-ul telefonului);
  *  - "Alege pe hartă" (harta OpenStreetMap pe tot ecranul, atingi locul).

@@ -14,7 +14,3 @@
 .cxx
 local.properties
 .idea
-# Secrete: cheia de semnare a aplicatiei si parolele ei nu se pun niciodata pe GitHub
-keystore.properties
-*.jks
-*.keystore
